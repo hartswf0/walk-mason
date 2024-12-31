@@ -68,10 +68,22 @@ Optimized for modern browsers with WebGL support:
 - Safari
 - Edge
 
+## License
+
+ThunderBuild is open source software licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
+
+The MIT License is a permissive license that is short and to the point. It lets people do anything they want with your code as long as they provide attribution back to you and don't hold you liable.
+
+### Third-Party Licenses
+
+ThunderBuild uses the following open-source libraries:
+
+- [Three.js](https://github.com/mrdoob/three.js/) - MIT License
+- [Hammer.js](https://github.com/hammerjs/hammer.js) - MIT License
+
 ## Project Structure
 
 ```
 ThunderBuild/
 ├── index.html    # Main application file (includes HTML, CSS, and JS)
 └── README.md     # Project documentation
-```
