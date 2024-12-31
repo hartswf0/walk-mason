@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ThunderBuild - 3D Construction Kit</title>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
+    <script type="module" src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.5/gsap.min.js"></script>
+    <style>
+        :root {
+            --clay-primary: #B22222;
+            --clay-secondary: #8B4513;
+            --clay-accent: #FFD700;
+            --clay-shadow: rgba(0, 0, 0, 0.3);
+            --clay-highlight: rgba(255, 255, 255, 0.1);
+            --control-size: 70px;
+            --modal-bg: #2E3440;
+            --modal-text: #ECEFF4;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, var(--clay-secondary), #654321);
+            font-family: monospace;
+            color: var(--clay-accent);
+            overflow: hidden;
+        }
+
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Component Library Panel */
+        .component-library {
+            position: fixed;
+            right: 20px;
+            top: 20px;
+            background: rgba(46, 52, 64, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 12px;
+            width: 250px;
+            color: var(--modal-text);
+            box-shadow: 0 10px 30px var(--clay-shadow);
+            z-index: 1000;
+        }
+
+        .component-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .component-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .component-item:hover {
+            background: var(--clay-accent);
+            color: var(--modal-bg);
+            transform: translateY(-2px);
+        }
+
+        /* Controls Panel */
+        .controls {
+            position: fixed;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(46, 52, 64, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 15px;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 1000;
+        }
+
+        .control-btn {
+            width: var(--control-size);
+            height: var(--control-size);
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 8px;
+            color: var(--clay-accent);
+            cursor: pointer;
+            font-size: 24px;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .control-btn:hover {
+            background: var(--clay-accent);
+            color: var(--modal-bg);
+            transform: translateX(5px);
+        }
+
+        .control-btn.active {
+            background: var(--clay-accent);
+            color: var(--modal-bg);
+            transform: scale(0.95);
+        }
+
+        /* Properties Panel */
+        .properties-panel {
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            background: rgba(46, 52, 64, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 12px;
+            width: 300px;
+            color: var(--modal-text);
+            display: none;
+            z-index: 1000;
+        }
+
+        .properties-panel.active {
+            display: block;
+        }
+
+        .property-group {
+            margin-bottom: 15px;
+        }
+
+        .property-row {
+            display: grid;
+            grid-template-columns: 100px 1fr;
+            gap: 10px;
+            margin-bottom: 8px;
+            align-items: center;
+        }
+
+        .property-input {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 5px 10px;
+            border-radius: 4px;
+            color: var(--modal-text);
+            width: 100%;
+        }
+
+        /* Context Menu */
+        .context-menu {
+            position: fixed;
+            background: rgba(46, 52, 64, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 8px;
+            padding: 5px;
+            display: none;
+            z-index: 1100;
+        }
+
+        .context-menu.active {
+            display: block;
+        }
+
+        .context-menu-item {
+            padding: 8px 15px;
+            cursor: pointer;
+            color: var(--modal-text);
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .context-menu-item:hover {
+            background: var(--clay-accent);
+            color: var(--modal-bg);
+        }
+
+        /* Tooltip */
+        .tooltip {
+            position: absolute;
+            left: 100%;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: var(--clay-accent);
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 14px;
+            white-space: nowrap;
+            margin-left: 10px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+        }
+
+        .control-btn:hover .tooltip {
+            opacity: 1;
+        }
+
+        @media (max-width: 768px) {
+            .component-library {
+                width: 200px;
+            }
+
+            .controls {
+                left: 10px;
+            }
+
+            .control-btn {
+                width: 50px;
+                height: 50px;
+                font-size: 20px;
+            }
+
+            .properties-panel {
+                width: 250px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+
+    <!-- Component Library -->
+    <div class="component-library">
+        <h2>Components</h2>
+        <div class="component-grid">
+            <div class="component-item" data-type="beam">Beam</div>
+            <div class="component-item" data-type="connector">Connector</div>
+            <div class="component-item" data-type="plate">Plate</div>
+            <div class="component-item" data-type="block">Block</div>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+        <button class="control-btn" data-tool="select">
+            👆
+            <span class="tooltip">Select (V)</span>
+        </button>
+        <button class="control-btn" data-tool="move">
+            ↕️
+            <span class="tooltip">Move (M)</span>
+        </button>
+        <button class="control-btn" data-tool="rotate">
+            🔄
+            <span class="tooltip">Rotate (R)</span>
+        </button>
+        <button class="control-btn" data-tool="scale">
+            📏
+            <span class="tooltip">Scale (S)</span>
+        </button>
+        <button class="control-btn" data-tool="copy">
+            📋
+            <span class="tooltip">Copy (Ctrl/⌘+C)</span>
+        </button>
+        <button class="control-btn" data-tool="paste">
+            📝
+            <span class="tooltip">Paste (Ctrl/⌘+V)</span>
+        </button>
+        <button class="control-btn" data-tool="duplicate">
+            👯
+            <span class="tooltip">Duplicate (Ctrl/⌘+D)</span>
+        </button>
+        <button class="control-btn" data-tool="delete">
+            🗑️
+            <span class="tooltip">Delete (Del)</span>
+        </button>
+    </div>
+
+    <!-- Properties Panel -->
+    <div class="properties-panel">
+        <h2>Properties</h2>
+        <div class="property-group">
+            <div class="property-row">
+                <label>Position X</label>
+                <input type="number" class="property-input" data-property="position-x" step="0.1">
+            </div>
+            <div class="property-row">
+                <label>Position Y</label>
+                <input type="number" class="property-input" data-property="position-y" step="0.1">
+            </div>
+            <div class="property-row">
+                <label>Position Z</label>
+                <input type="number" class="property-input" data-property="position-z" step="0.1">
+            </div>
+        </div>
+        <div class="property-group">
+            <div class="property-row">
+                <label>Rotation X</label>
+                <input type="number" class="property-input" data-property="rotation-x" step="1">
+            </div>
+            <div class="property-row">
+                <label>Rotation Y</label>
+                <input type="number" class="property-input" data-property="rotation-y" step="1">
+            </div>
+            <div class="property-row">
+                <label>Rotation Z</label>
+                <input type="number" class="property-input" data-property="rotation-z" step="1">
+            </div>
+        </div>
+        <div class="property-group">
+            <div class="property-row">
+                <label>Length</label>
+                <input type="number" class="property-input" data-property="length" step="0.1" min="0.1">
+            </div>
+            <div class="property-row">
+                <label>Width</label>
+                <input type="number" class="property-input" data-property="width" step="0.1" min="0.1">
+            </div>
+            <div class="property-row">
+                <label>Height</label>
+                <input type="number" class="property-input" data-property="height" step="0.1" min="0.1">
+            </div>
+        </div>
+    </div>
+
+    <!-- Context Menu -->
+    <div class="context-menu">
+        <div class="context-menu-item" data-action="copy">Copy</div>
+        <div class="context-menu-item" data-action="paste">Paste</div>
+        <div class="context-menu-item" data-action="delete">Delete</div>
+        <div class="context-menu-item" data-action="duplicate">Duplicate</div>
+    </div>
+
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>

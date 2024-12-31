@@ -1,0 +1,1833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Unified 3D Wood Frame Builder + Advanced Subdivision</title>
+
+  <!-- Three.js Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- Include Hammer.js for touch gestures -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+
+  <style>
+    /* RESET & BASE */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      touch-action: manipulation;
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    /* 3D Canvas Container */
+    #canvas-container {
+      flex: 1;
+      background: #fff;
+      position: relative;
+    }
+    /* Bottom controls area */
+    .controls {
+      background: #fff;
+      box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+      padding: 0.5rem;
+      display: flex;
+      flex-direction: column;
+      height: 40vh;
+      overflow-y: auto;
+    }
+    /* Tab Container */
+    .tab-container {
+      display: flex;
+      justify-content: space-around;
+      border-top: 1px solid #e0e0e0;
+    }
+    .tab {
+      flex: 1;
+      padding: 0.75rem 0;
+      text-align: center;
+      cursor: pointer;
+      font-size: 16px;
+      background: none;
+      border: none;
+      color: #666;
+      transition: background 0.3s, color 0.3s;
+    }
+    .tab.active {
+      color: #2196F3;
+      border-bottom: 2px solid #2196F3;
+    }
+    /* Tab Content */
+    .tab-content {
+      display: none;
+      padding: 0.5rem;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    /* Slider Groups */
+    .slider-group {
+      margin: 1rem 0;
+    }
+    .slider-label {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.5rem;
+      font-size: 16px;
+    }
+    input[type="range"] {
+      width: 100%;
+      height: 40px;
+      -webkit-appearance: none;
+      background: #e0e0e0;
+      border-radius: 20px;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 40px;
+      height: 40px;
+      background: #2196F3;
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+    }
+    /* Beam Controls */
+    .beam-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    select,
+    button {
+      padding: 1rem;
+      font-size: 16px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      cursor: pointer;
+    }
+    select {
+      background: #fff;
+      color: #333;
+    }
+    button {
+      background: #2196F3;
+      color: white;
+      border: none;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background: #1976D2;
+    }
+    button.delete {
+      background: #dc3545;
+    }
+    button.delete:hover {
+      background: #bd2130;
+    }
+    /* Beam List */
+    .beam-list {
+      max-height: 150px;
+      overflow-y: auto;
+      margin-top: 0.5rem;
+    }
+    .beam-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem;
+      border: 1px solid #e0e0e0;
+      margin-bottom: 0.5rem;
+      border-radius: 4px;
+      background: #fafafa;
+    }
+    /* Subdivision Tab Content */
+    .subdivision-controls {
+      display: none; /* shown only if needed */
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+    .subdivision-controls.active {
+      display: flex;
+    }
+    /* Export Tab */
+    .button-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+    .cost-estimate {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: #E3F2FD;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+    /* Grid Toggle Button */
+    .grid-toggle {
+      margin-top: 1rem;
+      display: flex;
+      justify-content: center;
+    }
+    .grid-toggle button {
+      background: #607D8B;
+    }
+    .grid-toggle button:hover {
+      background: #455A64;
+    }
+    /* Selected Beam Highlight */
+    .selected {
+      outline: 2px solid #FF5722;
+    }
+    /* Responsive for smaller screens */
+    @media (max-width: 600px) {
+      .controls {
+        height: 50vh;
+      }
+    }
+    /* Bottom Panel (beam manipulation) */
+    .bottom-panel {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: white;
+      padding: 1rem;
+      border-top-left-radius: 20px;
+      border-top-right-radius: 20px;
+      box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+      transform: translateY(100%);
+      transition: transform 0.3s ease-out;
+      z-index: 1000;
+      max-height: 80vh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .bottom-panel.active {
+      transform: translateY(0);
+    }
+
+    .bottom-panel h2 {
+      margin: 0 0 1rem;
+      font-size: 1.2rem;
+      text-align: center;
+    }
+
+    /* Close button for panel */
+    .panel-close {
+      position: absolute;
+      right: 1rem;
+      top: 1rem;
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      color: #666;
+      padding: 0.5rem;
+      cursor: pointer;
+    }
+
+    /* Beam controls grid */
+    .beam-controls-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    /* Movement controls */
+    .movement-controls {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.5rem;
+      max-width: 200px;
+      margin: 0 auto 1rem;
+    }
+
+    .move-btn {
+      padding: 1rem;
+      border: none;
+      border-radius: 8px;
+      background: #2196F3;
+      color: white;
+      font-size: 1.2rem;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    .move-btn:active {
+      background: #1976D2;
+    }
+
+    /* Empty cells in movement grid */
+    .movement-controls .empty {
+      visibility: hidden;
+    }
+
+    /* Action buttons */
+    .action-buttons {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .action-btn {
+      padding: 1rem;
+      border: none;
+      border-radius: 8px;
+      background: #4CAF50;
+      color: white;
+      font-size: 1rem;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    .action-btn:active {
+      background: #388E3C;
+    }
+
+    .action-btn.delete {
+      background: #f44336;
+    }
+
+    .action-btn.delete:active {
+      background: #d32f2f;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 600px) {
+      .bottom-panel {
+        border-radius: 20px 20px 0 0;
+      }
+
+      .movement-controls {
+        max-width: 150px;
+      }
+
+      .move-btn {
+        padding: 0.8rem;
+      }
+
+      .action-btn {
+        padding: 0.8rem;
+      }
+    }
+
+    /* Prevent scrolling of background when panel is open */
+    body.panel-open {
+      overflow: hidden;
+    }
+
+    /* Modal Beam Controls */
+    .beam-modal {
+      position: fixed;
+      right: 20px;
+      top: 20px;
+      background: rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      padding: 1.5rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      z-index: 1100;
+      width: 350px;
+      display: none;
+    }
+
+    .beam-modal.active {
+      display: block;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      color: #fff;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+
+    .modal-header h2 {
+      margin: 0;
+      font-size: 1.2rem;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      cursor: pointer;
+      padding: 0.5rem;
+      color: #fff;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+
+    .control-section {
+      margin-bottom: 1.5rem;
+      background: rgba(255, 255, 255, 0.1);
+      padding: 1rem;
+      border-radius: 8px;
+    }
+
+    .control-section h3 {
+      margin: 0 0 1rem;
+      font-size: 1rem;
+      color: #fff;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+
+    .control-grid {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.8rem;
+      align-items: center;
+      margin-bottom: 0.8rem;
+    }
+
+    .control-label {
+      font-weight: bold;
+      color: #fff;
+      width: 20px;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+
+    .control-slider {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.3);
+      outline: none;
+    }
+
+    .control-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #fff;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    }
+
+    .control-value {
+      width: 60px;
+      text-align: right;
+      padding: 4px 8px;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 4px;
+      font-size: 0.9rem;
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+    }
+
+    .control-value:focus {
+      outline: none;
+      border-color: rgba(255, 255, 255, 0.5);
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .control-buttons {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.8rem;
+      margin-top: 1rem;
+    }
+
+    .ctrl-btn {
+      padding: 0.8rem;
+      border: none;
+      border-radius: 6px;
+      color: white;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: all 0.2s;
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .ctrl-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+      transform: translateY(-1px);
+    }
+
+    .ctrl-btn:active {
+      transform: translateY(0);
+    }
+
+    .ctrl-btn.copy { border-color: rgba(255, 152, 0, 0.5); }
+    .ctrl-btn.rotate { border-color: rgba(76, 175, 80, 0.5); }
+    .ctrl-btn.move { border-color: rgba(33, 150, 243, 0.5); }
+    .ctrl-btn.delete { border-color: rgba(244, 67, 54, 0.5); }
+
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.3);
+      backdrop-filter: blur(2px);
+      -webkit-backdrop-filter: blur(2px);
+      z-index: 1050;
+      display: none;
+    }
+
+    .modal-overlay.active {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- 3D Canvas -->
+  <div id="canvas-container"></div>
+
+  <!-- Bottom Controls (Tabs, etc.) -->
+  <div class="controls">
+    <!-- Tab Navigation -->
+    <div class="tab-container">
+      <button class="tab active" data-tab="dimensions">Dimensions</button>
+      <button class="tab" data-tab="beams">Beams</button>
+      <button class="tab" data-tab="subdivision">Subdivision</button>
+      <button class="tab" data-tab="advanced">Advanced</button>
+      <button class="tab" data-tab="export">Export</button>
+    </div>
+
+    <!-- Dimensions Tab Content -->
+    <div class="tab-content active" id="dimensions-tab">
+      <div class="slider-group">
+        <div class="slider-label">
+          <span>Width</span>
+          <span id="width-value">100</span>
+        </div>
+        <!-- Updated max from 42 to 200 -->
+        <input type="range" id="width" min="0" max="200" step="1" value="100">
+      </div>
+
+      <div class="slider-group">
+        <div class="slider-label">
+          <span>Height</span>
+          <span id="height-value">100</span>
+        </div>
+        <input type="range" id="height" min="0" max="200" step="1" value="100">
+      </div>
+
+      <div class="slider-group">
+        <div class="slider-label">
+          <span>Depth</span>
+          <span id="depth-value">100</span>
+        </div>
+        <input type="range" id="depth" min="0" max="200" step="1" value="100">
+      </div>
+    </div>
+
+    <!-- Beams Tab Content -->
+    <div class="tab-content" id="beams-tab">
+      <div class="beam-controls">
+        <select id="beam-type">
+          <option value="horizontal">Horizontal Beam</option>
+          <option value="vertical">Vertical Beam</option>
+        </select>
+        <button id="add-beam">Add Beam</button>
+      </div>
+
+      <div class="beam-list" id="beam-list">
+        <!-- Beam items will be added here dynamically -->
+      </div>
+
+      <!-- Grid Toggle Button -->
+      <div class="grid-toggle">
+        <button id="toggle-grid">Toggle Grid</button>
+      </div>
+    </div>
+
+    <!-- Subdivision Tab Content (Legacy) -->
+    <div class="tab-content" id="subdivision-tab">
+      <div class="subdivision-controls" id="subdivision-controls">
+        <label for="beam-select">Select Beam:</label>
+        <select id="beam-select">
+          <option value="">--Select Beam--</option>
+        </select>
+        <label for="subdivisions">Number of Subdivisions:</label>
+        <input type="number" id="subdivisions" min="1" max="10" value="2">
+        <button id="apply-subdivision">Apply Subdivision</button>
+      </div>
+    </div>
+
+    <!-- ADVANCED Tab Content -->
+    <div class="tab-content" id="advanced-tab">
+      <div class="advanced-controls">
+        <div class="control-row">
+          <label for="advWidth">Width:</label>
+          <input type="range" id="advWidth" min="50" max="200" value="100" step="1" />
+          <span class="value" id="advWidthVal">100</span>
+        </div>
+        <div class="control-row">
+          <label for="advDepth">Depth:</label>
+          <input type="range" id="advDepth" min="30" max="200" value="60" step="1" />
+          <span class="value" id="advDepthVal">60</span>
+        </div>
+        <div class="control-row">
+          <label for="advHeight">Height:</label>
+          <input type="range" id="advHeight" min="40" max="200" value="80" step="1" />
+          <span class="value" id="advHeightVal">80</span>
+        </div>
+        <div class="control-row">
+          <label for="advRotation">Rotation:</label>
+          <input type="range" id="advRotation" min="0" max="360" value="0" step="1" />
+          <span class="value" id="advRotationVal">0</span>
+        </div>
+        <div class="control-row">
+          <label for="numCrossBeams">Top Subdivisions:</label>
+          <input type="range" id="numCrossBeams" min="1" max="10" value="5" step="1" />
+          <span class="value" id="numCrossBeamsVal">5</span>
+        </div>
+        <div class="control-row">
+          <label for="crossBeamLayers">Top Grid Layers:</label>
+          <input type="range" id="crossBeamLayers" min="1" max="3" value="1" step="1" />
+          <span class="value" id="crossBeamLayersVal">1</span>
+        </div>
+        <div class="control-row">
+          <label for="heightSubdivisions">Height Subdivisions:</label>
+          <input type="range" id="heightSubdivisions" min="1" max="5" value="1" step="1" />
+          <span class="value" id="heightSubdivisionsVal">1</span>
+        </div>
+        <div class="control-row">
+          <label for="spacingVariation">Spacing Variation:</label>
+          <input type="range" id="spacingVariation" min="0.5" max="2" value="1" step="0.1" />
+          <span class="value" id="spacingVariationVal">1</span>
+        </div>
+        <div class="control-row">
+          <label for="addSideBracing">Side Bracing:</label>
+          <input type="checkbox" id="addSideBracing" />
+        </div>
+        <div class="control-row">
+          <button id="autoRotateBtn">Auto-Rotate</button>
+          <button id="screenshotBtn">Screenshot</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export Tab Content -->
+    <div class="tab-content" id="export-tab">
+      <div class="button-group">
+        <button id="export-image">Export Image</button>
+      </div>
+      <div class="cost-estimate">
+        <h3>Estimated Cost</h3>
+        <p id="cost">$0.00</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Panel for Beam Manipulation -->
+  <div class="bottom-panel" id="beam-bottom-panel">
+    <button class="panel-close" onclick="closeBottomPanel()">×</button>
+    <h2 id="beam-label">Beam Controls</h2>
+    
+    <div class="movement-controls">
+      <div class="empty"></div>
+      <button class="move-btn" onclick="moveBeam('up')">↑</button>
+      <div class="empty"></div>
+      <button class="move-btn" onclick="moveBeam('left')">←</button>
+      <button class="move-btn" onclick="rotateBeam()">↻</button>
+      <button class="move-btn" onclick="moveBeam('right')">→</button>
+      <div class="empty"></div>
+      <button class="move-btn" onclick="moveBeam('down')">↓</button>
+      <div class="empty"></div>
+    </div>
+
+    <div class="action-buttons">
+      <button class="action-btn" onclick="copyBeam()">Copy</button>
+      <button class="action-btn" onclick="pasteBeam()">Paste</button>
+      <button class="action-btn delete" onclick="deleteSelectedBeam()">Delete</button>
+    </div>
+  </div>
+
+  <!-- Beam Control Modal -->
+  <div class="modal-overlay" id="beam-modal-overlay"></div>
+  <div class="beam-modal" id="beam-modal">
+    <div class="modal-header">
+      <h2 id="modal-beam-label">Beam Controls</h2>
+      <button class="modal-close" onclick="closeBeamModal()">×</button>
+    </div>
+
+    <div class="control-section">
+      <h3>Position</h3>
+      <div class="control-grid">
+        <span class="control-label">X</span>
+        <input type="range" class="control-slider" id="posX-slider" min="0" max="200" step="1" oninput="updateBeamPosition('x', this.value)">
+        <input type="number" class="control-value" id="posX" onchange="updateBeamPosition('x', this.value)" step="1">
+      </div>
+      <div class="control-grid">
+        <span class="control-label">Y</span>
+        <input type="range" class="control-slider" id="posY-slider" min="0" max="200" step="1" oninput="updateBeamPosition('y', this.value)">
+        <input type="number" class="control-value" id="posY" onchange="updateBeamPosition('y', this.value)" step="1">
+      </div>
+      <div class="control-grid">
+        <span class="control-label">Z</span>
+        <input type="range" class="control-slider" id="posZ-slider" min="0" max="200" step="1" oninput="updateBeamPosition('z', this.value)">
+        <input type="number" class="control-value" id="posZ" onchange="updateBeamPosition('z', this.value)" step="1">
+      </div>
+    </div>
+
+    <div class="control-section">
+      <h3>Rotation</h3>
+      <div class="control-grid">
+        <span class="control-label">X</span>
+        <input type="range" class="control-slider" id="rotX-slider" min="0" max="360" step="90" oninput="updateBeamRotation('x', this.value)">
+        <input type="number" class="control-value" id="rotX" onchange="updateBeamRotation('x', this.value)" step="90">
+      </div>
+      <div class="control-grid">
+        <span class="control-label">Y</span>
+        <input type="range" class="control-slider" id="rotY-slider" min="0" max="360" step="90" oninput="updateBeamRotation('y', this.value)">
+        <input type="number" class="control-value" id="rotY" onchange="updateBeamRotation('y', this.value)" step="90">
+      </div>
+      <div class="control-grid">
+        <span class="control-label">Z</span>
+        <input type="range" class="control-slider" id="rotZ-slider" min="0" max="360" step="90" oninput="updateBeamRotation('z', this.value)">
+        <input type="number" class="control-value" id="rotZ" onchange="updateBeamRotation('z', this.value)" step="90">
+      </div>
+    </div>
+
+    <div class="control-buttons">
+      <button class="ctrl-btn copy" onclick="copyBeam()">Copy</button>
+      <button class="ctrl-btn rotate" onclick="snapToGrid()">Snap to Grid</button>
+      <button class="ctrl-btn move" onclick="resetPosition()">Reset Position</button>
+      <button class="ctrl-btn delete" onclick="deleteSelectedBeam()">Delete</button>
+    </div>
+  </div>
+
+  <script>
+    // ----------------------------------
+    // GLOBALS
+    // ----------------------------------
+    let scene, camera, renderer;
+    let frame;               // Legacy frame group
+    let gridHelper;
+    let beams = [];          // Manually added beams
+    let beamCounter = 0;
+    let selectedBeam = null;
+    let clipboard = null;    // For copy-paste
+    const gridSize = 1;      // For snapping
+
+    // ADVANCED FRAME
+    let advancedFrame;       // "Adobe-style" advanced framework
+    let isAutoRotating = false;
+    let autoRotateInterval = null;
+
+    // Because we want uniform beam thickness (4) in both systems:
+    const UNIFIED_BEAM_THICKNESS = 4;
+
+    // Raycaster for beam selection
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    // ----------------------------------
+    // INIT
+    // ----------------------------------
+    function init() {
+      // Scene
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xffffff);
+
+      // Camera
+      // We allow up to 200 units, so let's position the camera a bit further out:
+      const aspect = window.innerWidth / (window.innerHeight * 0.6);
+      camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 2000);
+      camera.position.set(150, 250, 250);
+      camera.lookAt(0, 0, 0);
+
+      // Renderer
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight * 0.6);
+      document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+      // Lights
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      scene.add(ambientLight);
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      directionalLight.position.set(300, 300, 300);
+      scene.add(directionalLight);
+
+      // Grid
+      // Let's set the grid to 200 to match the new scale:
+      gridHelper = new THREE.GridHelper(200, 50, 0x888888, 0xcccccc);
+      gridHelper.rotation.x = Math.PI / 2;
+      scene.add(gridHelper);
+
+      // Legacy frame group
+      frame = new THREE.Group();
+      scene.add(frame);
+
+      // Advanced frame group
+      advancedFrame = new THREE.Group();
+      scene.add(advancedFrame);
+
+      // Legacy dimension-based
+      updateFrame();
+
+      // Setup 
+      setupTabs();
+      setupControls();
+      setupTouchControls();
+      setupBottomPanel();
+      setupSelectionControls();
+
+      // Subdivision tab
+      populateBeamSelection();
+
+      // Animate
+      animate();
+
+      // Resize
+      window.addEventListener('resize', onWindowResize, false);
+    }
+
+    // ----------------------------------
+    // SETUP TABS
+    // ----------------------------------
+    function setupTabs() {
+      const tabs = document.querySelectorAll('.tab');
+      const tabContents = document.querySelectorAll('.tab-content');
+
+      tabs.forEach((tab) => {
+        tab.addEventListener('click', () => {
+          // Remove active from all tabs
+          tabs.forEach((t) => t.classList.remove('active'));
+          tab.classList.add('active');
+
+          // Hide all tab contents
+          tabContents.forEach((content) => content.classList.remove('active'));
+          // Show current
+          const target = document.getElementById(`${tab.dataset.tab}-tab`);
+          if (target) target.classList.add('active');
+        });
+      });
+    }
+
+    // ----------------------------------
+    // SETUP CONTROLS
+    // ----------------------------------
+    function setupControls() {
+      // Legacy dimension sliders
+      ['width', 'height', 'depth'].forEach((dim) => {
+        const slider = document.getElementById(dim);
+        const valDisplay = document.getElementById(`${dim}-value`);
+        slider.addEventListener('input', (e) => {
+          valDisplay.textContent = e.target.value;
+          updateFrame();
+        });
+      });
+
+      // Add Beam
+      document.getElementById('add-beam').addEventListener('click', addBeam);
+
+      // Toggle Grid
+      document.getElementById('toggle-grid').addEventListener('click', toggleGrid);
+
+      // Legacy Subdivision
+      document.getElementById('apply-subdivision').addEventListener('click', applySubdivision);
+
+      // Export Image
+      document.getElementById('export-image').addEventListener('click', exportImage);
+
+      // ADVANCED tab sliders/checkbox
+      const advList = [
+        'advWidth','advDepth','advHeight','advRotation','numCrossBeams',
+        'crossBeamLayers','heightSubdivisions','spacingVariation'
+      ];
+      advList.forEach((id) => {
+        document.getElementById(id).addEventListener('input', updateAdvancedValues);
+      });
+      document.getElementById('addSideBracing').addEventListener('change', updateAdvancedFramework);
+
+      // Buttons in advanced tab
+      document.getElementById('autoRotateBtn').addEventListener('click', toggleAutoRotate);
+      document.getElementById('screenshotBtn').addEventListener('click', takeScreenshot);
+
+      // Initialize advanced framework once
+      updateAdvancedFramework();
+    }
+
+    // ----------------------------------
+    // LEGACY: UPDATE FRAME (Corner posts, etc.), using beam thickness=4
+    // ----------------------------------
+    function updateFrame() {
+      // Clear corner posts (they might have changed)
+      for (let i = frame.children.length - 1; i >= 0; i--) {
+        const child = frame.children[i];
+        if (child.userData && child.userData.isCornerPost) {
+          frame.remove(child);
+        }
+      }
+
+      const widthVal = parseFloat(document.getElementById('width').value);
+      const heightVal = parseFloat(document.getElementById('height').value);
+      const depthVal = parseFloat(document.getElementById('depth').value);
+
+      // Create corner posts (4 wide, 4 deep, variable heightVal)
+      const postsInfo = [
+        { x: widthVal / 2, z: depthVal / 2 },
+        { x: -widthVal / 2, z: depthVal / 2 },
+        { x: widthVal / 2, z: -depthVal / 2 },
+        { x: -widthVal / 2, z: -depthVal / 2 },
+      ];
+      postsInfo.forEach((pos) => {
+        const post = createBox(UNIFIED_BEAM_THICKNESS, heightVal, UNIFIED_BEAM_THICKNESS);
+        post.position.set(pos.x, heightVal / 2, pos.z);
+        post.userData.isCornerPost = true;
+        frame.add(post);
+      });
+
+      // Re-add beams & subdivisions
+      beams.forEach((beam) => {
+        if (!frame.children.includes(beam.mesh)) frame.add(beam.mesh);
+        beam.subdivisions.forEach((sub) => {
+          if (!frame.children.includes(sub.mesh)) frame.add(sub.mesh);
+        });
+      });
+
+      updateCost();
+    }
+
+    // ----------------------------------
+    // CREATE BOX for legacy beams (with thickness=4)
+    // ----------------------------------
+    function createBox(w, h, d, colorHex = 0xa0522d) {
+      const geometry = new THREE.BoxGeometry(w, h, d);
+      const material = new THREE.MeshPhongMaterial({ color: colorHex, shininess: 5 });
+      return new THREE.Mesh(geometry, material);
+    }
+
+    // ----------------------------------
+    // LEGACY: ADD BEAM (4x4 thickness)
+    // ----------------------------------
+    function addBeam() {
+      const beamType = document.getElementById('beam-type').value;
+      const widthVal = parseFloat(document.getElementById('width').value);
+      const heightVal = parseFloat(document.getElementById('height').value);
+
+      if (beamType === 'horizontal' && widthVal === 0) {
+        alert('Width cannot be zero for a horizontal beam.');
+        return;
+      }
+      if (beamType === 'vertical' && heightVal === 0) {
+        alert('Height cannot be zero for a vertical beam.');
+        return;
+      }
+
+      const beamId = `beam-${beamCounter}`;
+      let mesh;
+      if (beamType === 'horizontal') {
+        // thickness=4, thickness=4, length=widthVal
+        mesh = createBox(UNIFIED_BEAM_THICKNESS, UNIFIED_BEAM_THICKNESS, widthVal);
+        // Place at y=4, if you want it near the floor
+        mesh.position.set(0, UNIFIED_BEAM_THICKNESS, 0);
+      } else {
+        // thickness=4, length=heightVal, thickness=4
+        mesh = createBox(UNIFIED_BEAM_THICKNESS, heightVal, UNIFIED_BEAM_THICKNESS);
+        // center vertically
+        mesh.position.set(0, heightVal / 2, 0);
+      }
+      mesh.userData = { isDraggable: true, type: beamType, id: beamId };
+
+      beams.push({ id: beamId, mesh, type: beamType, subdivisions: [] });
+      frame.add(mesh);
+
+      // UI
+      const beamList = document.getElementById('beam-list');
+      const item = document.createElement('div');
+      item.className = 'beam-item';
+      item.id = beamId;
+      item.innerHTML = `
+        <span>${capitalize(beamType)} Beam #${beamCounter + 1}</span>
+        <div>
+          <button class="delete" onclick="removeBeam('${beamId}')">Delete</button>
+        </div>
+      `;
+      beamList.appendChild(item);
+
+      beamCounter++;
+      updateCost();
+      populateBeamSelection();
+    }
+
+    // GLOBAL removeBeam
+    window.removeBeam = function(beamId) {
+      const idx = beams.findIndex((b) => b.id === beamId);
+      if (idx !== -1) {
+        if (selectedBeam === beams[idx].mesh) {
+          deselectBeam();
+        }
+        // remove subdivisions
+        beams[idx].subdivisions.forEach((sb) => frame.remove(sb.mesh));
+        frame.remove(beams[idx].mesh);
+        beams.splice(idx, 1);
+
+        // Remove from UI
+        const item = document.getElementById(beamId);
+        if (item) item.parentNode.removeChild(item);
+
+        updateCost();
+        populateBeamSelection();
+      }
+    };
+
+    // ----------------------------------
+    // POPULATE BEAM SELECTION (Subdiv tab)
+    // ----------------------------------
+    function populateBeamSelection() {
+      const beamSelect = document.getElementById('beam-select');
+      beamSelect.innerHTML = '<option value="">--Select Beam--</option>';
+      beams.forEach((beam, i) => {
+        beamSelect.innerHTML += `<option value="${beam.id}">${capitalize(beam.type)} Beam #${i + 1}</option>`;
+      });
+    }
+
+    // ----------------------------------
+    // APPLY SUBDIVISION (Legacy)
+    // ----------------------------------
+    function applySubdivision() {
+      const beamSelect = document.getElementById('beam-select');
+      const subdivisionsInput = document.getElementById('subdivisions');
+      const beamId = beamSelect.value;
+      const numSubs = parseInt(subdivisionsInput.value);
+
+      if (!beamId || isNaN(numSubs) || numSubs < 1) {
+        alert('Select beam and valid # of subdivisions.');
+        return;
+      }
+      const beamObj = beams.find((b) => b.id === beamId);
+      if (!beamObj) {
+        alert('Beam not found.');
+        return;
+      }
+
+      // Clear old
+      beamObj.subdivisions.forEach((sb) => frame.remove(sb.mesh));
+      beamObj.subdivisions = [];
+
+      // Re-subdivide
+      let totalLength;
+      if (beamObj.type === 'horizontal') {
+        totalLength = beamObj.mesh.geometry.parameters.depth; 
+        const pieceLength = totalLength / numSubs;
+        for (let i = 0; i < numSubs; i++) {
+          const sub = createBox(UNIFIED_BEAM_THICKNESS, UNIFIED_BEAM_THICKNESS, pieceLength);
+          const offset = -totalLength / 2 + pieceLength / 2 + i * pieceLength;
+          sub.position.set(beamObj.mesh.position.x, UNIFIED_BEAM_THICKNESS, beamObj.mesh.position.z + offset);
+          beamObj.subdivisions.push({ mesh: sub });
+          frame.add(sub);
+        }
+      } else {
+        totalLength = beamObj.mesh.geometry.parameters.height;
+        const pieceLength = totalLength / numSubs;
+        for (let i = 0; i < numSubs; i++) {
+          const sub = createBox(UNIFIED_BEAM_THICKNESS, pieceLength, UNIFIED_BEAM_THICKNESS);
+          const offset = -totalLength / 2 + pieceLength / 2 + i * pieceLength;
+          sub.position.set(beamObj.mesh.position.x, beamObj.mesh.position.y + offset, beamObj.mesh.position.z);
+          beamObj.subdivisions.push({ mesh: sub });
+          frame.add(sub);
+        }
+      }
+
+      alert(`${capitalize(beamObj.type)} beam subdivided into ${numSubs} parts.`);
+      updateCost();
+    }
+
+    // ----------------------------------
+    // UPDATE COST
+    // ----------------------------------
+    function updateCost() {
+      const widthVal = parseFloat(document.getElementById('width').value);
+      const heightVal = parseFloat(document.getElementById('height').value);
+      const depthVal = parseFloat(document.getElementById('depth').value);
+
+      // corner posts total length
+      const cornerPostsLength = heightVal * 4; // 4 posts
+      let beamLength = 0;
+      beams.forEach((b) => {
+        if (b.type === 'horizontal') {
+          beamLength += b.mesh.geometry.parameters.depth;
+          b.subdivisions.forEach((sb) => {
+            beamLength += sb.mesh.geometry.parameters.depth;
+          });
+        } else {
+          beamLength += b.mesh.geometry.parameters.height;
+          b.subdivisions.forEach((sb) => {
+            beamLength += sb.mesh.geometry.parameters.height;
+          });
+        }
+      });
+
+      // $2.50/foot => $0.2083/inch
+      // Even though we scaled up to 200 possible units, we'll treat them as "inches" for cost.
+      // (Or treat them as some measurement consistent with your cost logic.)
+      const costPerInch = 0.2083;
+      const totalCost = (cornerPostsLength + beamLength) * costPerInch;
+      document.getElementById('cost').textContent = `$${totalCost.toFixed(2)}`;
+    }
+
+    // ----------------------------------
+    // CAPITALIZE
+    // ----------------------------------
+    function capitalize(text) {
+      return text.charAt(0).toUpperCase() + text.slice(1);
+    }
+
+    // ----------------------------------
+    // TOGGLE GRID
+    // ----------------------------------
+    function toggleGrid() {
+      gridHelper.visible = !gridHelper.visible;
+    }
+
+    // ----------------------------------
+    // EXPORT IMAGE (Legacy)
+    // ----------------------------------
+    function exportImage() {
+      renderer.render(scene, camera);
+      const dataURL = renderer.domElement.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.href = dataURL;
+      link.download = 'wood-frame-screenshot.png';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // ----------------------------------
+    // TOUCH CONTROLS
+    // ----------------------------------
+    function setupTouchControls() {
+      const hammer = new Hammer(renderer.domElement);
+      hammer.get('pinch').set({ enable: true });
+      hammer.get('pan').set({ direction: Hammer.DIRECTION_ALL });
+
+      // If no beam selected, pan => rotate frame
+      hammer.on('panmove', (e) => {
+        if (!selectedBeam) {
+          frame.rotation.y += e.deltaX * 0.005;
+        }
+      });
+
+      // Pinch => zoom
+      let initialZoom = camera.zoom;
+      hammer.on('pinchmove', (e) => {
+        camera.zoom = Math.max(0.5, Math.min(2, initialZoom * e.scale));
+        camera.updateProjectionMatrix();
+      });
+      hammer.on('pinchend', () => {
+        initialZoom = camera.zoom;
+      });
+
+      // Tap => select beam
+      renderer.domElement.addEventListener('touchend', (event) => {
+        if (event.changedTouches.length === 1) {
+          const touch = event.changedTouches[0];
+          const rect = renderer.domElement.getBoundingClientRect();
+          const mouse = new THREE.Vector2(
+            ((touch.clientX - rect.left) / rect.width) * 2 - 1,
+            -((touch.clientY - rect.top) / rect.height) * 2 + 1
+          );
+
+          const raycaster = new THREE.Raycaster();
+          raycaster.setFromCamera(mouse, camera);
+          const intersects = raycaster.intersectObjects(frame.children, true);
+          if (intersects.length > 0) {
+            const selectedObject = intersects[0].object;
+            selectBeam(selectedObject);
+          } else {
+            deselectBeam();
+          }
+        }
+      });
+    }
+
+    // SELECT BEAM
+    function selectBeam(beam) {
+      // If we already have a selected beam, reset its color
+      if (selectedBeam) {
+        selectedBeam.material.color.setHex(0xa0522d);
+      }
+      
+      // Set new selected beam
+      selectedBeam = beam;
+      
+      // Highlight the selected beam
+      selectedBeam.material.color.setHex(0xff5722);
+      
+      // Find or set beam ID
+      if (!selectedBeam.userData.id) {
+        selectedBeam.userData.id = findBeamId(selectedBeam);
+      }
+      
+      // Show controls
+      openBeamModal();
+      updateBeamLabel();
+      
+      // Log selection for debugging
+      console.log('Selected beam:', selectedBeam);
+    }
+
+    // DESELECT BEAM
+    function deselectBeam() {
+      if (selectedBeam) {
+        selectedBeam.material.color.setHex(0xa0522d);
+        selectedBeam = null;
+        closeBeamModal();
+      }
+    }
+
+    // FIND ID
+    function findBeamId(mesh) {
+      const obj = beams.find((b) => b.mesh === mesh);
+      return obj ? obj.id : null;
+    }
+
+    // ----------------------------------
+    // BOTTOM PANEL
+    // ----------------------------------
+    function setupBottomPanel() {
+      const panel = document.getElementById('beam-bottom-panel');
+      const moveLeftBtn = panel.querySelector('.move-btn');
+      const moveRightBtn = panel.querySelector('.move-btn');
+      const moveUpBtn = panel.querySelector('.move-btn');
+      const moveDownBtn = panel.querySelector('.move-btn');
+      const rotateBtn = panel.querySelector('.move-btn');
+      const copyBtn = panel.querySelector('.action-btn');
+      const pasteBtn = panel.querySelector('.action-btn');
+      const deleteBtn = panel.querySelector('.action-btn.delete');
+      const closeBtn = panel.querySelector('.panel-close');
+
+      moveLeftBtn.addEventListener('click', () => moveBeam('left'));
+      moveRightBtn.addEventListener('click', () => moveBeam('right'));
+      moveUpBtn.addEventListener('click', () => moveBeam('up'));
+      moveDownBtn.addEventListener('click', () => moveBeam('down'));
+      rotateBtn.addEventListener('click', rotateBeam);
+      copyBtn.addEventListener('click', copyBeam);
+      pasteBtn.addEventListener('click', pasteBeam);
+      deleteBtn.addEventListener('click', deleteSelectedBeam);
+      closeBtn.addEventListener('click', closeBottomPanel);
+    }
+
+    function openBottomPanel() {
+      document.getElementById('beam-bottom-panel').classList.add('active');
+      document.body.classList.add('panel-open');
+    }
+
+    function closeBottomPanel() {
+      document.getElementById('beam-bottom-panel').classList.remove('active');
+      document.body.classList.remove('panel-open');
+    }
+
+    function updateBeamLabel() {
+      if (!selectedBeam) return;
+      const beamObj = beams.find((b) => b.id === selectedBeam.userData.id);
+      if (beamObj) {
+        document.getElementById('beam-label').textContent = 
+          `${capitalize(beamObj.type)} Beam #${beams.indexOf(beamObj) + 1} Controls`;
+      }
+    }
+
+    // Movement/Rotation/Copy/Paste/Delete
+    function moveBeam(dir) {
+      if (!selectedBeam) {
+        alert('Please select a beam first');
+        return;
+      }
+      
+      const moveAmount = gridSize;
+      const oldPosition = selectedBeam.position.clone();
+      
+      switch(dir) {
+        case 'left':
+          selectedBeam.position.x -= moveAmount;
+          break;
+        case 'right':
+          selectedBeam.position.x += moveAmount;
+          break;
+        case 'up':
+          selectedBeam.position.z -= moveAmount;
+          break;
+        case 'down':
+          selectedBeam.position.z += moveAmount;
+          break;
+      }
+      
+      // Snap to grid
+      selectedBeam.position.x = Math.round(selectedBeam.position.x / gridSize) * gridSize;
+      selectedBeam.position.z = Math.round(selectedBeam.position.z / gridSize) * gridSize;
+      
+      // Validate position
+      if (!isValidPosition(selectedBeam)) {
+        selectedBeam.position.copy(oldPosition);
+        return;
+      }
+      
+      constrainBeamPosition(selectedBeam);
+      updateBeamLabel();
+      updateCost();
+    }
+
+    function rotateBeam() {
+      if (!selectedBeam) {
+        alert('Please select a beam first');
+        return;
+      }
+      
+      // Store old rotation for validation
+      const oldRotation = selectedBeam.rotation.clone();
+      
+      // Rotate 90 degrees around Y axis
+      selectedBeam.rotation.y = (selectedBeam.rotation.y + Math.PI / 2) % (Math.PI * 2);
+      
+      // Update beam type based on rotation
+      const rot = selectedBeam.rotation.y % (Math.PI * 2);
+      if (Math.abs(rot) < 0.001 || Math.abs(rot - Math.PI) < 0.001) {
+        selectedBeam.userData.type = 'horizontal';
+      } else {
+        selectedBeam.userData.type = 'vertical';
+      }
+      
+      // Update UI
+      updateBeamLabel();
+      updateCost();
+    }
+
+    function isValidPosition(beam) {
+      if (!beam) return false;
+      
+      const boundingBox = new THREE.Box3().setFromObject(beam);
+      const min = boundingBox.min;
+      const max = boundingBox.max;
+      
+      // Check boundaries
+      if (min.x < 0 || max.x > 200 || 
+          min.y < 0 || max.y > 200 || 
+          min.z < 0 || max.z > 200) {
+        return false;
+      }
+      
+      // Check collisions with other beams
+      for (const otherBeam of beams) {
+        if (otherBeam.mesh !== beam) {
+          const otherBox = new THREE.Box3().setFromObject(otherBeam.mesh);
+          if (boundingBox.intersectsBox(otherBox)) {
+            return false;
+          }
+        }
+      }
+      
+      return true;
+    }
+
+    function constrainBeamPosition(beam) {
+      if (!beam) return;
+      
+      // Keep within bounds
+      beam.position.x = Math.max(0, Math.min(200, beam.position.x));
+      beam.position.y = Math.max(0, Math.min(200, beam.position.y));
+      beam.position.z = Math.max(0, Math.min(200, beam.position.z));
+      
+      // Snap to grid
+      beam.position.x = Math.round(beam.position.x / gridSize) * gridSize;
+      beam.position.y = Math.round(beam.position.y / gridSize) * gridSize;
+      beam.position.z = Math.round(beam.position.z / gridSize) * gridSize;
+    }
+
+    function copyBeam() {
+      if (!selectedBeam) {
+        alert('Select a beam to copy');
+        return;
+      }
+      
+      clipboard = {
+        type: selectedBeam.userData.type,
+        geometry: selectedBeam.geometry.clone(),
+        material: selectedBeam.material.clone(),
+        position: selectedBeam.position.clone(),
+        rotation: selectedBeam.rotation.clone(),
+      };
+      
+      // Visual feedback
+      const originalColor = selectedBeam.material.color.getHex();
+      selectedBeam.material.color.setHex(0x00ff00);
+      setTimeout(() => {
+        selectedBeam.material.color.setHex(originalColor);
+      }, 200);
+    }
+
+    function pasteBeam() {
+      if (!clipboard) {
+        alert('No beam in clipboard');
+        return;
+      }
+      
+      const newBeam = new THREE.Mesh(
+        clipboard.geometry.clone(),
+        clipboard.material.clone()
+      );
+      
+      // Position slightly offset from original
+      newBeam.position.copy(clipboard.position);
+      newBeam.rotation.copy(clipboard.rotation);
+      newBeam.position.x += gridSize;
+      newBeam.position.z += gridSize;
+      
+      // Ensure position is valid
+      if (!isValidPosition(newBeam)) {
+        alert('Cannot paste beam at this position');
+        return;
+      }
+      
+      const beamId = `beam-${beamCounter}`;
+      newBeam.userData = { 
+        isDraggable: true, 
+        type: clipboard.type, 
+        id: beamId 
+      };
+      
+      beams.push({ 
+        id: beamId, 
+        mesh: newBeam, 
+        type: clipboard.type, 
+        subdivisions: [] 
+      });
+      
+      frame.add(newBeam);
+      
+      // Update UI
+      const beamList = document.getElementById('beam-list');
+      const item = document.createElement('div');
+      item.className = 'beam-item';
+      item.id = beamId;
+      item.innerHTML = `
+        <span>${capitalize(clipboard.type)} Beam #${beamCounter + 1}</span>
+        <div><button class="delete" onclick="removeBeam('${beamId}')">Delete</button></div>
+      `;
+      beamList.appendChild(item);
+      
+      beamCounter++;
+      updateCost();
+      populateBeamSelection();
+      
+      // Select the newly pasted beam
+      selectBeam(newBeam);
+    }
+
+    function deleteSelectedBeam() {
+      if (!selectedBeam) return;
+      
+      removeBeam(selectedBeam.userData.id);
+      closeBeamModal();
+    }
+
+    // Setup mouse/touch event listeners for beam selection
+    function setupSelectionControls() {
+      const container = document.getElementById('canvas-container');
+      
+      // Mouse events
+      container.addEventListener('mousedown', onPointerDown);
+      container.addEventListener('touchstart', onPointerDown);
+      
+      // Prevent context menu on right click
+      container.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
+
+    function onPointerDown(event) {
+      event.preventDefault();
+      
+      const container = document.getElementById('canvas-container');
+      const rect = container.getBoundingClientRect();
+      
+      // Get mouse/touch position
+      let clientX, clientY;
+      if (event.touches) {
+        clientX = event.touches[0].clientX;
+        clientY = event.touches[0].clientY;
+      } else {
+        clientX = event.clientX;
+        clientY = event.clientY;
+      }
+      
+      // Calculate normalized coordinates
+      mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      
+      // Update raycaster
+      raycaster.setFromCamera(mouse, camera);
+      
+      // Get all selectable objects
+      const selectableObjects = [];
+      frame.traverse((child) => {
+        if (child.isMesh && !child.userData.isCornerPost) {
+          selectableObjects.push(child);
+        }
+      });
+      
+      // Find intersections
+      const intersects = raycaster.intersectObjects(selectableObjects);
+      
+      if (intersects.length > 0) {
+        const selectedObject = intersects[0].object;
+        selectBeam(selectedObject);
+      } else {
+        deselectBeam();
+      }
+    }
+
+    // ----------------------------------
+    // ADVANCED FRAMEWORK (New Tab)
+    // ----------------------------------
+    function updateAdvancedValues(e) {
+      // Show range value
+      const tgt = e.target;
+      document.getElementById(tgt.id + 'Val').textContent = tgt.value;
+      // Rebuild
+      updateAdvancedFramework();
+    }
+
+    function updateAdvancedFramework() {
+      // Grab values
+      const w = parseInt(document.getElementById('advWidth').value);
+      const d = parseInt(document.getElementById('advDepth').value);
+      const h = parseInt(document.getElementById('advHeight').value);
+      const rotDeg = parseInt(document.getElementById('advRotation').value);
+      const rot = (rotDeg * Math.PI) / 180;
+      const numCross = parseInt(document.getElementById('numCrossBeams').value);
+      const crossLayers = parseInt(document.getElementById('crossBeamLayers').value);
+      const hSubs = parseInt(document.getElementById('heightSubdivisions').value);
+      const spacingVar = parseFloat(document.getElementById('spacingVariation').value);
+      const sideBracing = document.getElementById('addSideBracing').checked;
+
+      // Clear advanced frame
+      while (advancedFrame.children.length > 0) {
+        advancedFrame.remove(advancedFrame.children[0]);
+      }
+
+      buildAdvancedFrame(w, d, h, numCross, crossLayers, hSubs, spacingVar, sideBracing);
+
+      // Rotation
+      advancedFrame.rotation.y = rot;
+    }
+
+    function createAdvBeam(length, width, height) {
+      const geometry = new THREE.BoxGeometry(length, width, height);
+      const mat = new THREE.MeshPhongMaterial({
+        color: 0xc4a484,
+        specular: 0x111111,
+        shininess: 30,
+      });
+      return new THREE.Mesh(geometry, mat);
+    }
+
+    function buildAdvancedFrame(w, d, h, nCross, crossLayers, hSubs, spacingVar, sideBracing) {
+      const beamWidth = 4;
+
+      // Base beams (floor)
+      const front = createAdvBeam(w, beamWidth, beamWidth);
+      front.position.set(0, 0, d / 2);
+      advancedFrame.add(front);
+
+      const back = createAdvBeam(w, beamWidth, beamWidth);
+      back.position.set(0, 0, -d / 2);
+      advancedFrame.add(back);
+
+      const left = createAdvBeam(d, beamWidth, beamWidth);
+      left.position.set(-w / 2, 0, 0);
+      left.rotation.y = Math.PI / 2;
+      advancedFrame.add(left);
+
+      const right = createAdvBeam(d, beamWidth, beamWidth);
+      right.position.set(w / 2, 0, 0);
+      right.rotation.y = Math.PI / 2;
+      advancedFrame.add(right);
+
+      // Corner posts
+      const corners = [
+        [-w/2, -d/2],
+        [-w/2,  d/2],
+        [ w/2, -d/2],
+        [ w/2,  d/2]
+      ];
+      corners.forEach(([cx, cz]) => {
+        const support = createAdvBeam(beamWidth, h, beamWidth);
+        support.position.set(cx, h / 2, cz);
+        advancedFrame.add(support);
+      });
+
+      // Additional "floors" (heightSubdivisions)
+      const segH = h / hSubs;
+      for (let sub = 1; sub < hSubs; sub++) {
+        const levelY = sub * segH;
+        const f = createAdvBeam(w, beamWidth, beamWidth);
+        f.position.set(0, levelY, d/2);
+        advancedFrame.add(f);
+
+        const b = createAdvBeam(w, beamWidth, beamWidth);
+        b.position.set(0, levelY, -d/2);
+        advancedFrame.add(b);
+
+        const l = createAdvBeam(d, beamWidth, beamWidth);
+        l.position.set(-w/2, levelY, 0);
+        l.rotation.y = Math.PI / 2;
+        advancedFrame.add(l);
+
+        const r = createAdvBeam(d, beamWidth, beamWidth);
+        r.position.set(w/2, levelY, 0);
+        r.rotation.y = Math.PI / 2;
+        advancedFrame.add(r);
+      }
+
+      // Top grid layers
+      const topLayerSpacing = 10;
+      for (let layer = 0; layer < crossLayers; layer++) {
+        const yOff = h + layer * topLayerSpacing;
+        const spacing = (w / (nCross - 1)) * spacingVar;
+        for (let i = 0; i < nCross; i++) {
+          const x = - (w/2 * spacingVar) + i * spacing;
+          const cross = createAdvBeam(beamWidth, beamWidth, d);
+          cross.position.set(x, yOff, 0);
+          advancedFrame.add(cross);
+        }
+      }
+
+      // Side bracing
+      if (sideBracing) {
+        addDiagonal(-w/2, -d/2, w, d, h, 'frontLeft');
+        addDiagonal(-w/2,  d/2, w, -d, h, 'backLeft');
+      }
+    }
+
+    function addDiagonal(sx, sz, w, dd, hh, label) {
+      const beamWidth = 4;
+      const dx = w, dy = hh, dz = dd;
+      const length = Math.sqrt(dx*dx + dy*dy + dz*dz);
+      const diag = createAdvBeam(length, beamWidth, beamWidth);
+
+      diag.position.set(sx + dx/2, dy/2, sz + dz/2);
+      diag.lookAt(new THREE.Vector3(sx + dx, dy, sz + dz));
+      diag.rotateY(-Math.PI/2);
+
+      advancedFrame.add(diag);
+    }
+
+    // ----------------------------------
+    // AUTO ROTATE (Advanced)
+    // ----------------------------------
+    function toggleAutoRotate() {
+      isAutoRotating = !isAutoRotating;
+      const btn = document.getElementById('autoRotateBtn');
+      btn.textContent = isAutoRotating ? 'Stop Rotate' : 'Auto-Rotate';
+      if (isAutoRotating) startAutoRotate();
+      else stopAutoRotate();
+    }
+    function startAutoRotate() {
+      const advRot = document.getElementById('advRotation');
+      let val = parseInt(advRot.value) || 0;
+      autoRotateInterval = setInterval(() => {
+        val = (val + 1) % 360;
+        advRot.value = val;
+        document.getElementById('advRotationVal').textContent = val;
+        updateAdvancedFramework();
+      }, 50);
+    }
+    function stopAutoRotate() {
+      clearInterval(autoRotateInterval);
+      autoRotateInterval = null;
+    }
+
+    // ----------------------------------
+    // TAKE SCREENSHOT (Advanced)
+    // ----------------------------------
+    function takeScreenshot() {
+      renderer.render(scene, camera);
+      const link = document.createElement('a');
+      link.download = 'advanced_screenshot.png';
+      link.href = renderer.domElement.toDataURL('image/png');
+      link.click();
+    }
+
+    // ----------------------------------
+    // ANIMATE
+    // ----------------------------------
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+
+    // ----------------------------------
+    // RESIZE
+    // ----------------------------------
+    function onWindowResize() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      camera.aspect = w / (h * 0.6);
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h * 0.6);
+    }
+
+    // ----------------------------------
+    // START
+    // ----------------------------------
+    window.onload = init;
+
+    // Beam Control Modal Functions
+    function openBeamModal() {
+      document.getElementById('beam-modal').classList.add('active');
+      document.getElementById('beam-modal-overlay').classList.add('active');
+      updateModalControls();
+    }
+
+    function closeBeamModal() {
+      document.getElementById('beam-modal').classList.remove('active');
+      document.getElementById('beam-modal-overlay').classList.remove('active');
+    }
+
+    function updateModalControls() {
+      if (!selectedBeam) return;
+
+      // Update position controls
+      const pos = selectedBeam.position;
+      document.getElementById('posX').value = pos.x.toFixed(1);
+      document.getElementById('posY').value = pos.y.toFixed(1);
+      document.getElementById('posZ').value = pos.z.toFixed(1);
+      document.getElementById('posX-slider').value = pos.x;
+      document.getElementById('posY-slider').value = pos.y;
+      document.getElementById('posZ-slider').value = pos.z;
+
+      // Update rotation controls (convert to degrees)
+      const rot = selectedBeam.rotation;
+      const toDegrees = (rad) => ((rad * 180 / Math.PI) + 360) % 360;
+      document.getElementById('rotX').value = toDegrees(rot.x).toFixed(0);
+      document.getElementById('rotY').value = toDegrees(rot.y).toFixed(0);
+      document.getElementById('rotZ').value = toDegrees(rot.z).toFixed(0);
+      document.getElementById('rotX-slider').value = toDegrees(rot.x);
+      document.getElementById('rotY-slider').value = toDegrees(rot.y);
+      document.getElementById('rotZ-slider').value = toDegrees(rot.z);
+
+      // Update beam label
+      document.getElementById('modal-beam-label').textContent = 
+        document.getElementById('beam-label').textContent;
+    }
+
+    function updateBeamPosition(axis, value) {
+      if (!selectedBeam) return;
+
+      const newValue = parseFloat(value);
+      if (isNaN(newValue)) return;
+
+      const oldPosition = selectedBeam.position.clone();
+
+      switch(axis) {
+        case 'x':
+          selectedBeam.position.x = newValue;
+          document.getElementById('posX-slider').value = newValue;
+          document.getElementById('posX').value = newValue.toFixed(1);
+          break;
+        case 'y':
+          selectedBeam.position.y = newValue;
+          document.getElementById('posY-slider').value = newValue;
+          document.getElementById('posY').value = newValue.toFixed(1);
+          break;
+        case 'z':
+          selectedBeam.position.z = newValue;
+          document.getElementById('posZ-slider').value = newValue;
+          document.getElementById('posZ').value = newValue.toFixed(1);
+          break;
+      }
+
+      if (!isValidPosition(selectedBeam)) {
+        selectedBeam.position.copy(oldPosition);
+        updateModalControls();
+        return;
+      }
+
+      updateCost();
+      render();
+    }
+
+    function updateBeamRotation(axis, value) {
+      if (!selectedBeam) return;
+
+      const newValue = (parseFloat(value) * Math.PI) / 180; // Convert to radians
+      if (isNaN(newValue)) return;
+
+      const oldRotation = selectedBeam.rotation.clone();
+
+      switch(axis) {
+        case 'x':
+          selectedBeam.rotation.x = newValue;
+          document.getElementById('rotX-slider').value = (value % 360);
+          document.getElementById('rotX').value = (value % 360).toFixed(0);
+          break;
+        case 'y':
+          selectedBeam.rotation.y = newValue;
+          document.getElementById('rotY-slider').value = (value % 360);
+          document.getElementById('rotY').value = (value % 360).toFixed(0);
+          break;
+        case 'z':
+          selectedBeam.rotation.z = newValue;
+          document.getElementById('rotZ-slider').value = (value % 360);
+          document.getElementById('rotZ').value = (value % 360).toFixed(0);
+          break;
+      }
+
+      updateBeamType();
+      updateCost();
+      render();
+    }
+
+    function snapToGrid() {
+      if (!selectedBeam) return;
+      
+      // Snap position to grid
+      selectedBeam.position.x = Math.round(selectedBeam.position.x / gridSize) * gridSize;
+      selectedBeam.position.y = Math.round(selectedBeam.position.y / gridSize) * gridSize;
+      selectedBeam.position.z = Math.round(selectedBeam.position.z / gridSize) * gridSize;
+      
+      // Snap rotation to nearest 90 degrees
+      selectedBeam.rotation.x = Math.round(selectedBeam.rotation.x / (Math.PI / 2)) * (Math.PI / 2);
+      selectedBeam.rotation.y = Math.round(selectedBeam.rotation.y / (Math.PI / 2)) * (Math.PI / 2);
+      selectedBeam.rotation.z = Math.round(selectedBeam.rotation.z / (Math.PI / 2)) * (Math.PI / 2);
+      
+      updateModalControls();
+      updateBeamType();
+      updateCost();
+      render();
+    }
+
+    function resetPosition() {
+      if (!selectedBeam) return;
+      
+      const center = new THREE.Vector3();
+      center.x = Math.round(100 / gridSize) * gridSize;
+      center.y = Math.round(100 / gridSize) * gridSize;
+      center.z = Math.round(100 / gridSize) * gridSize;
+      
+      selectedBeam.position.copy(center);
+      selectedBeam.rotation.set(0, 0, 0);
+      
+      updateModalControls();
+      updateBeamType();
+      updateCost();
+      render();
+    }
+  </script>
+</body>
+</html>
