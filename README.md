@@ -1,2 +1,2 @@
 # walk-mason
-to walk is to buld
+to walk is to build
