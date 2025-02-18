@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; }
+        canvas { display: block; }
+        #cameraFeed {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            width: 160px;
+            border: 2px solid #666;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="cityCanvas"></canvas>
+    <video id="cameraFeed" autoplay muted></video>
+    <script>
+        const canvas = document.getElementById('cityCanvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('cameraFeed');
+
+        // Configuration
+        const BRICK_WIDTH = 24;
+        const BRICK_HEIGHT = 12;
+        const MORTAR = 2;
+        const TIME_LAYERS = 30;
+        const Z_STEP = 4;
+        const DECAY_RATE = 0.96;
+
+        // Setup
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        const GRID_X = Math.ceil(canvas.width / BRICK_WIDTH);
+        const GRID_Y = Math.ceil(canvas.height / BRICK_HEIGHT);
+        const TIME_GRID = Array(GRID_X).fill().map(() => 
+            Array(GRID_Y).fill().map(() => 
+                Array(TIME_LAYERS).fill(0)
+            )
+        );
+
+        // Camera setup
+        let lastFrame;
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => video.srcObject = stream);
+
+        function processCamera() {
+            if (!video.videoWidth) return;
+
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = video.videoWidth;
+            tempCanvas.height = video.videoHeight;
+            const tctx = tempCanvas.getContext('2d');
+            tctx.drawImage(video, 0, 0);
+            
+            const currentFrame = tctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+            if (!lastFrame) lastFrame = currentFrame.data;
+
+            for(let x = 0; x < GRID_X; x++) {
+                for(let y = 0; y < GRID_Y; y++) {
+                    const camX = Math.floor((x/GRID_X) * video.videoWidth);
+                    const camY = Math.floor((y/GRID_Y) * video.videoHeight);
+                    const i = (camY * video.videoWidth + camX) * 4;
+                    
+                    const diff = Math.abs(currentFrame.data[i] - lastFrame[i]) +
+                                 Math.abs(currentFrame.data[i+1] - lastFrame[i+1]) +
+                                 Math.abs(currentFrame.data[i+2] - lastFrame[i+2]);
+                    
+                    // Shift time layers and add new value
+                    TIME_GRID[x][y].pop();
+                    TIME_GRID[x][y].unshift(Math.min(1, diff / 100));
+                }
+            }
+            lastFrame = new Uint8ClampedArray(currentFrame.data);
+        }
+
+        // Brick drawing with perspective
+        function drawBrick(x, y, z) {
+            const depth = z * Z_STEP;
+            const brickX = x * BRICK_WIDTH;
+            const brickY = y * BRICK_HEIGHT - depth;
+            
+            // Base brick
+            ctx.fillStyle = `hsl(15, 60%, ${40 - (z/TIME_LAYERS)*20}%)`;
+            ctx.fillRect(
+                brickX + depth*0.3,
+                brickY + depth*0.3,
+                BRICK_WIDTH - MORTAR,
+                BRICK_HEIGHT - MORTAR
+            );
+
+            // Mortar lines
+            ctx.strokeStyle = `hsl(15, 20%, ${30 - (z/TIME_LAYERS)*15}%)`;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(
+                brickX + depth*0.3 + 0.5,
+                brickY + depth*0.3 + 0.5,
+                BRICK_WIDTH - MORTAR - 1,
+                BRICK_HEIGHT - MORTAR - 1
+            );
+
+            // Top surface
+            ctx.fillStyle = `hsl(15, 40%, ${50 - (z/TIME_LAYERS)*15}%)`;
+            ctx.fillRect(
+                brickX + depth*0.3 + 2,
+                brickY + depth*0.3 + 2,
+                BRICK_WIDTH - MORTAR - 4,
+                2
+            );
+        }
+
+        function animate() {
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            processCamera();
+            
+            // Draw all time layers
+            for(let z = 0; z < TIME_LAYERS; z++) {
+                for(let x = 0; x < GRID_X; x++) {
+                    for(let y = 0; y < GRID_Y; y++) {
+                        const intensity = TIME_GRID[x][y][z] * DECAY_RATE ** z;
+                        if(intensity > 0.1) {
+                            ctx.globalAlpha = intensity;
+                            drawBrick(x, y, z);
+                        }
+                    }
+                }
+            }
+            ctx.globalAlpha = 1;
+
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+    </script>
+</body>
+</html>

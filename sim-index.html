@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ThunderBuild Navigator</title>
+    <style>
+        :root {
+            --brick-red: #8B4513;
+            --mortar: #808080;
+            --highlight: #FFD700;
+            --text: #333;
+            --background: #F5F5F5;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: var(--background);
+            font-family: system-ui, -apple-system, sans-serif;
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 100%;
+            overflow-x: hidden;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: var(--brick-red);
+            color: var(--background);
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .header h1 {
+            font-size: clamp(1.5rem, 5vw, 2.5rem);
+            margin-bottom: 0.5rem;
+        }
+        
+        .header p {
+            font-size: clamp(0.9rem, 3vw, 1.1rem);
+            opacity: 0.9;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .category {
+            background: white;
+            padding: 1rem;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .category h2 {
+            color: var(--brick-red);
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--mortar);
+            font-size: clamp(1.1rem, 3vw, 1.4rem);
+        }
+        
+        .brick-list {
+            display: grid;
+            gap: 0.5rem;
+        }
+        
+        .brick-link {
+            display: block;
+            padding: 0.8rem;
+            background: var(--brick-red);
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .brick-link:hover {
+            background: var(--highlight);
+            color: var(--text);
+            transform: translateY(-2px);
+        }
+        
+        .brick-link::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, transparent, rgba(255,255,255,0.1), transparent);
+            transform: translateX(-100%);
+            transition: transform 0.3s ease;
+        }
+        
+        .brick-link:hover::before {
+            transform: translateX(100%);
+        }
+        
+        @media (max-width: 600px) {
+            body {
+                padding: 10px;
+            }
+            
+            .grid {
+                grid-template-columns: 1fr;
+                gap: 0.8rem;
+            }
+            
+            .brick-link {
+                padding: 0.8rem;
+                font-size: 1rem;
+                margin-bottom: 0.5rem;
+            }
+
+            .category {
+                padding: 0.8rem;
+                margin-bottom: 0.5rem;
+            }
+
+            .header {
+                margin-bottom: 1rem;
+                padding: 0.8rem;
+            }
+
+            .header h1 {
+                font-size: 1.5rem;
+            }
+
+            .header p {
+                font-size: 0.9rem;
+            }
+
+            .description {
+                font-size: 0.8rem;
+            }
+
+            .category h2 {
+                font-size: 1.2rem;
+                margin-bottom: 0.8rem;
+            }
+        }
+
+        @media (max-width: 380px) {
+            body {
+                padding: 5px;
+            }
+
+            .brick-link {
+                padding: 0.7rem;
+                font-size: 0.9rem;
+            }
+
+            .description {
+                font-size: 0.75rem;
+            }
+        }
+        
+        .description {
+            font-size: 0.9rem;
+            color: rgba(255,255,255,0.8);
+            margin-top: 0.3rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>ThunderBuild Navigator</h1>
+        <p>Peripatetic Perdurantist Collection</p>
+    </div>
+    
+    <div class="grid">
+        <div class="category">
+            <h2>Main Pages</h2>
+            <div class="brick-list">
+                <a href="index.html" class="brick-link">
+                    Main Index
+                    <div class="description">Bass-Inspired Home</div>
+                </a>
+                <a href="docs/camera_transform_diagram.html" class="brick-link">
+                    Camera Transform
+                    <div class="description">Technical Documentation</div>
+                </a>
+            </div>
+        </div>
+
+        <div class="category">
+            <h2>Great Halls</h2>
+            <div class="brick-list">
+                <a href="great-hall.html" class="brick-link">
+                    Great Hall
+                    <div class="description">The Original Experience</div>
+                </a>
+                <a href="gh1.html" class="brick-link">
+                    Great Hall One
+                    <div class="description">First Iteration</div>
+                </a>
+                <a href="gh2.html" class="brick-link">
+                    Great Hall Two
+                    <div class="description">Light & Shadow Studies</div>
+                </a>
+                <a href="gh3.html" class="brick-link">
+                    Great Hall Three
+                    <div class="description">Dynamic Space Evolution</div>
+                </a>
+                <a href="oggh.html" class="brick-link">
+                    OG Great Hall
+                    <div class="description">The Foundation</div>
+                </a>
+            </div>
+        </div>
+        
+        <div class="category">
+            <h2>Brick Studies</h2>
+            <div class="brick-list">
+                <a href="brick-mirror2.html" class="brick-link">
+                    Brick Mirror II
+                    <div class="description">Reflective Patterns</div>
+                </a>
+                <a href="brick-mirror3.html" class="brick-link">
+                    Brick Mirror III
+                    <div class="description">Advanced Reflections</div>
+                </a>
+                <a href="brick-dna.html" class="brick-link">
+                    Brick DNA
+                    <div class="description">Genetic Architecture</div>
+                </a>
+            </div>
+        </div>
+        
+        <div class="category">
+            <h2>Base Systems</h2>
+            <div class="brick-list">
+                <a href="base.html" class="brick-link">
+                    Base System
+                    <div class="description">Core Framework</div>
+                </a>
+                <a href="base-gen-2.html" class="brick-link">
+                    Base Gen 2
+                    <div class="description">Second Generation</div>
+                </a>
+            </div>
+        </div>
+        
+        <div class="category">
+            <h2>Explorations</h2>
+            <div class="brick-list">
+                <a href="perdurantist-intro.html" class="brick-link">
+                    Perdurantist Intro
+                    <div class="description">Philosophical Framework</div>
+                </a>
+                <a href="self-building-city-simulation.html" class="brick-link">
+                    Self-Building City
+                    <div class="description">Autonomous Architecture</div>
+                </a>
+                <a href="walkerthunder.html" class="brick-link">
+                    Walker Thunder
+                    <div class="description">Dynamic Movement</div>
+                </a>
+                <a href="whale-city.html" class="brick-link">
+                    Whale City
+                    <div class="description">Oceanic Urbanism</div>
+                </a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

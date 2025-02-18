@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Full-screen canvas -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Tunnel Sculpting Interface</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #111; }
+    canvas { display: block; }
+    /* Optional mini-camera preview */
+    #cameraFeed {
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      width: 160px;
+      opacity: 0.6;
+      border: 2px solid #fff;
+    }
+  </style>
+</head>
+<body>
+  <!-- Hidden camera preview -->
+  <video id="cameraFeed" autoplay playsinline muted></video>
+  <!-- Full-screen canvas for the 3D scene -->
+  <canvas id="canvas"></canvas>
+  <script>
+    /***** SETUP: CANVAS, VIDEO, AND OFFSCREEN FRAME PROCESSING *****/
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const video = document.getElementById("cameraFeed");
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+
+    // Offscreen canvas for processing the camera feed.
+    const offCanvas = document.createElement("canvas");
+    const offCtx = offCanvas.getContext("2d");
+
+    // Request camera access (must be served via HTTPS or localhost).
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+      .then(stream => {
+        video.srcObject = stream;
+        video.play();
+      })
+      .catch(err => console.error("Camera access error:", err));
+
+    /***** 3D SCENE & TUNNEL PARAMETERS *****/
+    // Perspective parameters.
+    const focalLength = 500; // adjust for field-of-view
+    // Room/tunnel dimensions (world units)
+    const floorZStart = 100;  // front wall position (z coordinate)
+    const roomWidth    = 600; // width (x direction, centered about 0)
+    const roomDepth    = 800; // depth (z direction)
+    const roomHeight   = 400; // height (y direction)
+
+    // Camera: place it centered vertically (eye level) and a bit in front of the front wall.
+    const cameraPos = { x: 0, y: roomHeight / 2, z: floorZStart - 50 };
+
+    // Clay extrusion scale (world units per clay unit).
+    const clayScale = 3;
+
+    // Grid resolution (each surface is subdivided into gridCols x gridRows cells)
+    const gridCols = 60;
+    const gridRows = 60;
+
+    // Create separate grids for each surface.
+    let floorGrid   = [], ceilingGrid = [], leftGrid  = [], rightGrid = [], backGrid = [];
+    for (let i = 0; i < gridCols; i++) {
+      floorGrid[i]   = [];
+      ceilingGrid[i] = [];
+      leftGrid[i]    = [];
+      rightGrid[i]   = [];
+      backGrid[i]    = [];
+      for (let j = 0; j < gridRows; j++) {
+        floorGrid[i][j]   = 0;
+        ceilingGrid[i][j] = 0;
+        leftGrid[i][j]    = 0;
+        rightGrid[i][j]   = 0;
+        backGrid[i][j]    = 0;
+      }
+    }
+
+    // Deposition & erosion parameters.
+    const depositionRate = 3;
+    const motionThreshold  = 20;
+
+    // Different multipliers for each surface.
+    const depositionMultipliers = {
+      floor: 0.8,
+      ceiling: 0.6,
+      left: 1.0,
+      right: 1.0,
+      back: 0.9
+    };
+
+    const erosionMultipliers = {
+      floor:   { strong: 0.95, weak: 0.90 },
+      ceiling: { strong: 0.95, weak: 0.90 },
+      left:    { strong: 0.93, weak: 0.88 },
+      right:   { strong: 0.93, weak: 0.88 },
+      back:    { strong: 0.94, weak: 0.89 }
+    };
+
+    // Maximum allowed extrusion to prevent walls from touching
+    const maxExtrusion = roomWidth * 0.2; // 20% of room width
+
+    // For comparing successive camera frames.
+    let prevFrameData = null;
+
+    // Track changes for flicker detection
+    let previousGrids = {
+      floor: [], ceiling: [], left: [], right: [], back: []
+    };
+    let flickerPoints = [];
+
+    /***** PERSPECTIVE PROJECTION FUNCTION *****/
+    // Transform world coordinates into camera-relative coordinates and project.
+    function project(x, y, z) {
+      // Translate by camera position.
+      const rx = x - cameraPos.x;
+      const ry = y - cameraPos.y;
+      const rz = z - cameraPos.z;
+      // Basic perspective division.
+      const scale = focalLength / (rz);
+      return {
+        x: rx * scale + canvas.width / 2,
+        y: -ry * scale + canvas.height / 2
+      };
+    }
+
+    /***** HELPER FUNCTION TO DRAW A FILLED POLYGON *****/
+    function drawPolygon(points, fillStyle) {
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = fillStyle;
+      ctx.fill();
+    }
+
+    /***** UPDATE DEPOSITION USING THE CAMERA FEED *****/
+    function updateDeposition() {
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        offCanvas.width = video.videoWidth;
+        offCanvas.height = video.videoHeight;
+        // Flip the video horizontally for more intuitive interaction
+        offCtx.scale(-1, 1);
+        offCtx.translate(-offCanvas.width, 0);
+        offCtx.drawImage(video, 0, 0, offCanvas.width, offCanvas.height);
+        offCtx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+        const frameData = offCtx.getImageData(0, 0, offCanvas.width, offCanvas.height);
+        if (!prevFrameData) {
+          prevFrameData = frameData;
+          return;
+        }
+        // Divide the video frame into a grid.
+        const cellW_video = offCanvas.width / gridCols;
+        const cellH_video = offCanvas.height / gridRows;
+        for (let i = 0; i < gridCols; i++) {
+          for (let j = 0; j < gridRows; j++) {
+            let sumDiff = 0, count = 0;
+            const sampleCount = 4; // sample a few random pixels per cell.
+            for (let s = 0; s < sampleCount; s++) {
+              const sampleX = Math.floor(i * cellW_video + Math.random() * cellW_video);
+              const sampleY = Math.floor(j * cellH_video + Math.random() * cellH_video);
+              const idx = (sampleY * offCanvas.width + sampleX) * 4;
+              const rDiff = Math.abs(frameData.data[idx] - prevFrameData.data[idx]);
+              const gDiff = Math.abs(frameData.data[idx + 1] - prevFrameData.data[idx + 1]);
+              const bDiff = Math.abs(frameData.data[idx + 2] - prevFrameData.data[idx + 2]);
+              sumDiff += (rDiff + gDiff + bDiff) / 3;
+              count++;
+            }
+            const avgDiff = sumDiff / count;
+            // Deposit on each surface using its multiplier.
+            if (avgDiff > motionThreshold) {
+              const depositFloor   = depositionRate * depositionMultipliers.floor   * (avgDiff / 255);
+              const depositCeiling = depositionRate * depositionMultipliers.ceiling * (avgDiff / 255);
+              const depositLeft    = depositionRate * depositionMultipliers.left    * (avgDiff / 255);
+              const depositRight   = depositionRate * depositionMultipliers.right   * (avgDiff / 255);
+              const depositBack    = depositionRate * depositionMultipliers.back    * (avgDiff / 255);
+              floorGrid[i][j]   = Math.min(floorGrid[i][j]   + depositFloor,   maxExtrusion);
+              ceilingGrid[i][j] = Math.min(ceilingGrid[i][j] + depositCeiling, maxExtrusion);
+              leftGrid[i][j]    = Math.min(leftGrid[i][j]    + depositLeft,    maxExtrusion);
+              rightGrid[i][j]   = Math.min(rightGrid[i][j]   + depositRight,   maxExtrusion);
+              backGrid[i][j]    = Math.min(backGrid[i][j]    + depositBack,    maxExtrusion);
+            } else if (avgDiff > 0) {
+              const depositFloor   = depositionRate * 0.3 * depositionMultipliers.floor   * (avgDiff / motionThreshold);
+              const depositCeiling = depositionRate * 0.3 * depositionMultipliers.ceiling * (avgDiff / motionThreshold);
+              const depositLeft    = depositionRate * 0.3 * depositionMultipliers.left    * (avgDiff / motionThreshold);
+              const depositRight   = depositionRate * 0.3 * depositionMultipliers.right   * (avgDiff / motionThreshold);
+              const depositBack    = depositionRate * 0.3 * depositionMultipliers.back    * (avgDiff / motionThreshold);
+              floorGrid[i][j]   += depositFloor;
+              ceilingGrid[i][j] += depositCeiling;
+              leftGrid[i][j]    += depositLeft;
+              rightGrid[i][j]   += depositRight;
+              backGrid[i][j]    += depositBack;
+            }
+          }
+        }
+        prevFrameData = frameData;
+      }
+    }
+
+    /***** UPDATE EROSION ON EACH SURFACE *****/
+    function updateErosion() {
+      for (let i = 0; i < gridCols; i++) {
+        for (let j = 0; j < gridRows; j++) {
+          // Floor erosion.
+          if (floorGrid[i][j] < motionThreshold) {
+            floorGrid[i][j] *= erosionMultipliers.floor.weak;
+          } else {
+            floorGrid[i][j] *= erosionMultipliers.floor.strong;
+          }
+          floorGrid[i][j] = Math.max(0, floorGrid[i][j]); // Never go negative
+
+          // Ceiling erosion.
+          if (ceilingGrid[i][j] < motionThreshold) {
+            ceilingGrid[i][j] *= erosionMultipliers.ceiling.weak;
+          } else {
+            ceilingGrid[i][j] *= erosionMultipliers.ceiling.strong;
+          }
+          ceilingGrid[i][j] = Math.max(0, ceilingGrid[i][j]); // Never go negative
+
+          // Left wall erosion.
+          if (leftGrid[i][j] < motionThreshold) {
+            leftGrid[i][j] *= erosionMultipliers.left.weak;
+          } else {
+            leftGrid[i][j] *= erosionMultipliers.left.strong;
+          }
+          leftGrid[i][j] = Math.max(0, leftGrid[i][j]); // Never go negative
+
+          // Right wall erosion.
+          if (rightGrid[i][j] < motionThreshold) {
+            rightGrid[i][j] *= erosionMultipliers.right.weak;
+          } else {
+            rightGrid[i][j] *= erosionMultipliers.right.strong;
+          }
+          rightGrid[i][j] = Math.max(0, rightGrid[i][j]); // Never go negative
+
+          // Back wall erosion.
+          if (backGrid[i][j] < motionThreshold) {
+            backGrid[i][j] *= erosionMultipliers.back.weak;
+          } else {
+            backGrid[i][j] *= erosionMultipliers.back.strong;
+          }
+          backGrid[i][j] = Math.max(0, backGrid[i][j]); // Never go negative
+        }
+      }
+    }
+
+    /***** RENDERING FUNCTIONS FOR EACH SURFACE *****/
+    // For each surface we define the base (or "anchor") plane and then extrude
+    // the clay in the appropriate direction.
+
+    // --- FLOOR (base at y = 0, extrusion upward) ---
+    function drawFloor() {
+      const cellWidth = roomWidth / gridCols;
+      const cellDepth = roomDepth / gridRows;
+      for (let i = 0; i < gridCols; i++) {
+        for (let j = 0; j < gridRows; j++) {
+          let clay = floorGrid[i][j];
+          if (Math.abs(clay) < 0.1) continue;
+          const h = clay * clayScale;
+          const x0 = -roomWidth / 2 + i * cellWidth;
+          const x1 = -roomWidth / 2 + (i + 1) * cellWidth;
+          const z0 = floorZStart + j * cellDepth;
+          const z1 = floorZStart + (j + 1) * cellDepth;
+          // Base corners on floor (y = 0)
+          const A0 = { x: x0, y: 0, z: z0 };
+          const B0 = { x: x1, y: 0, z: z0 };
+          const C0 = { x: x1, y: 0, z: z1 };
+          const D0 = { x: x0, y: 0, z: z1 };
+          // Extruded top face (y = h)
+          const A = { x: x0, y: h, z: z0 };
+          const B = { x: x1, y: h, z: z0 };
+          const C = { x: x1, y: h, z: z1 };
+          const D = { x: x0, y: h, z: z1 };
+
+          // Draw side walls.
+          const sideColor = `hsl(30,70%,${Math.max(30, 40 + h * 0.5)}%)`; // Minimum 30% brightness
+          drawPolygon([ project(A.x, A.y, A.z),
+                        project(B.x, B.y, B.z),
+                        project(B0.x, B0.y, B0.z),
+                        project(A0.x, A0.y, A0.z) ], sideColor);
+          drawPolygon([ project(B.x, B.y, B.z),
+                        project(C.x, C.y, C.z),
+                        project(C0.x, C0.y, C0.z),
+                        project(B0.x, B0.y, B0.z) ], sideColor);
+          drawPolygon([ project(C.x, C.y, C.z),
+                        project(D.x, D.y, D.z),
+                        project(D0.x, D0.y, D0.z),
+                        project(C0.x, C0.y, C0.z) ], sideColor);
+          drawPolygon([ project(D.x, D.y, D.z),
+                        project(A.x, A.y, A.z),
+                        project(A0.x, A0.y, A0.z),
+                        project(D0.x, D0.y, D0.z) ], sideColor);
+          // Draw the top face.
+          const topColor = `hsl(30,70%,${Math.max(40, 50 + h * 0.5)}%)`; // Minimum 40% brightness
+          drawPolygon([ project(A.x, A.y, A.z),
+                        project(B.x, B.y, B.z),
+                        project(C.x, C.y, C.z),
+                        project(D.x, D.y, D.z) ], topColor);
+        }
+      }
+    }
+
+    // --- CEILING (base at y = roomHeight, extrusion downward) ---
+    function drawCeiling() {
+      const cellWidth = roomWidth / gridCols;
+      const cellDepth = roomDepth / gridRows;
+      for (let i = 0; i < gridCols; i++) {
+        for (let j = 0; j < gridRows; j++) {
+          let clay = ceilingGrid[i][j];
+          if (Math.abs(clay) < 0.1) continue;
+          const h = clay * clayScale;
+          const x0 = -roomWidth / 2 + i * cellWidth;
+          const x1 = -roomWidth / 2 + (i + 1) * cellWidth;
+          const z0 = floorZStart + j * cellDepth;
+          const z1 = floorZStart + (j + 1) * cellDepth;
+          // Base corners on ceiling (y = roomHeight)
+          const A0 = { x: x0, y: roomHeight, z: z0 };
+          const B0 = { x: x1, y: roomHeight, z: z0 };
+          const C0 = { x: x1, y: roomHeight, z: z1 };
+          const D0 = { x: x0, y: roomHeight, z: z1 };
+          // Extruded face (downward)
+          const A = { x: x0, y: roomHeight - h, z: z0 };
+          const B = { x: x1, y: roomHeight - h, z: z0 };
+          const C = { x: x1, y: roomHeight - h, z: z1 };
+          const D = { x: x0, y: roomHeight - h, z: z1 };
+
+          // Use a more muted tone for the ceiling.
+          const sideColor = `hsl(30,60%,${Math.max(20, 40 - h * 0.2)}%)`;
+          drawPolygon([ project(A0.x, A0.y, A0.z),
+                        project(B0.x, B0.y, B0.z),
+                        project(B.x, B.y, B.z),
+                        project(A.x, A.y, A.z) ], sideColor);
+          drawPolygon([ project(B0.x, B0.y, B0.z),
+                        project(C0.x, C0.y, C0.z),
+                        project(C.x, C.y, C.z),
+                        project(B.x, B.y, B.z) ], sideColor);
+          drawPolygon([ project(C0.x, C0.y, C0.z),
+                        project(D0.x, D0.y, D0.z),
+                        project(D.x, D.y, D.z),
+                        project(C.x, C.y, C.z) ], sideColor);
+          drawPolygon([ project(D0.x, D0.y, D0.z),
+                        project(A0.x, A0.y, A0.z),
+                        project(A.x, A.y, A.z),
+                        project(D.x, D.y, D.z) ], sideColor);
+          const topColor = `hsl(30,60%,${Math.min(70, 50 - h * 0.2)}%)`;
+          drawPolygon([ project(A.x, A.y, A.z),
+                        project(B.x, B.y, B.z),
+                        project(C.x, C.y, C.z),
+                        project(D.x, D.y, D.z) ], topColor);
+        }
+      }
+    }
+
+    // --- LEFT WALL (base at x = -roomWidth/2, extrusion inward) ---
+    function drawWallWithLight(grid, isVertical, offset, depth) {
+      const cellWidth = isVertical ? roomDepth / gridCols : roomWidth / gridCols;
+      const cellHeight = roomHeight / gridRows;
+      
+      // Add ambient glow background
+      ctx.save();
+      const time = performance.now() * 0.0002;
+      const glowProgress = (Math.sin(time) * 0.5 + 0.5) * 0.3 + 0.7;
+      
+      // Create ambient gradient
+      const gradient = ctx.createRadialGradient(
+        canvas.width/2, canvas.height * 0.5, 0,
+        canvas.width/2, canvas.height * 0.5, canvas.width * 0.7
+      );
+      
+      gradient.addColorStop(0, `hsla(200, 80%, ${75 * glowProgress}%, 0.9)`);
+      gradient.addColorStop(0.3, `hsla(210, 70%, ${65 * glowProgress}%, 0.7)`);
+      gradient.addColorStop(1, `hsla(220, 60%, ${45 * glowProgress}%, 0.4)`);
+      
+      ctx.globalCompositeOperation = 'screen';
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.restore();
+      
+      // Draw the grid with enhanced edge lighting
+      for (let i = 0; i < gridCols; i++) {
+        for (let j = gridRows - 1; j >= 0; j--) {
+          let clay = grid[i][gridRows - 1 - j];
+          if (Math.abs(clay) < 0.1) continue;
+          
+          const time = performance.now() * 0.0005;
+          const breathing = Math.sin(time + (i + j) * 0.1) * 0.05 + 1;
+          const h = clay * clayScale * breathing;
+          
+          let x0, x1, z0, z1;
+          if (isVertical) {
+            x0 = offset;
+            x1 = offset;
+            z0 = -roomDepth/2 + i * cellWidth;
+            z1 = -roomDepth/2 + (i + 1) * cellWidth;
+          } else {
+            x0 = -roomWidth/2 + i * cellWidth;
+            x1 = -roomWidth/2 + (i + 1) * cellWidth;
+            z0 = depth;
+            z1 = depth;
+          }
+          const y0 = j * cellHeight;
+          const y1 = (j + 1) * cellHeight;
+          
+          // Calculate edge lighting based on height
+          const edgeY = y0 / roomHeight;
+          const edgeLightIntensity = Math.pow(1 - edgeY, 2) * glowProgress;
+          
+          // Base coordinates
+          const A0 = { x: x0, y: y0, z: z0 };
+          const B0 = { x: x1, y: y0, z: z1 };
+          const C0 = { x: x1, y: y1, z: z1 };
+          const D0 = { x: x0, y: y1, z: z0 };
+          
+          // Extruded coordinates
+          const extrusion = isVertical ? h : -h;
+          const A = { x: x0 + (isVertical ? extrusion : 0), y: y0, z: z0 + (isVertical ? 0 : extrusion) };
+          const B = { x: x1 + (isVertical ? extrusion : 0), y: y0, z: z1 + (isVertical ? 0 : extrusion) };
+          const C = { x: x1 + (isVertical ? extrusion : 0), y: y1, z: z1 + (isVertical ? 0 : extrusion) };
+          const D = { x: x0 + (isVertical ? extrusion : 0), y: y1, z: z0 + (isVertical ? 0 : extrusion) };
+          
+          const activity = Math.min(1, clay / (maxExtrusion * 0.5));
+          
+          ctx.save();
+          
+          // Base color with glow influence
+          const baseHue = 210 + edgeLightIntensity * 10;
+          const baseSat = 60 + activity * 20;
+          const baseLum = Math.min(85, (50 + activity * 30 + edgeLightIntensity * 20));
+          const sideColor = `hsl(${baseHue},${baseSat}%,${baseLum}%)`;
+          
+          // Draw surfaces with edge lighting
+          drawPolygon([project(A0.x, A0.y, A0.z),
+                      project(B0.x, B0.y, B0.z),
+                      project(B.x, B.y, B.z),
+                      project(A.x, A.y, A.z)], sideColor);
+          drawPolygon([project(B0.x, B0.y, B0.z),
+                      project(C0.x, C0.y, C0.z),
+                      project(C.x, C.y, C.z),
+                      project(B.x, B.y, B.z)], sideColor);
+          drawPolygon([project(C0.x, C0.y, C0.z),
+                      project(D0.x, D0.y, D0.z),
+                      project(D.x, D.y, D.z),
+                      project(C.x, C.y, C.z)], sideColor);
+          drawPolygon([project(D0.x, D0.y, D0.z),
+                      project(A0.x, A0.y, A0.z),
+                      project(A.x, A.y, A.z),
+                      project(D.x, D.y, D.z)], sideColor);
+          
+          // Add edge highlight glow
+          if (activity > 0.2 || edgeLightIntensity > 0.3) {
+            ctx.globalCompositeOperation = 'screen';
+            const glowIntensity = Math.max(
+              Math.pow(activity, 1.5) * 0.7,
+              edgeLightIntensity * 0.8
+            );
+            ctx.globalAlpha = glowIntensity;
+            
+            // Blend glow colors with activity
+            const glowHue = 200 + edgeLightIntensity * 20;
+            const glowSat = Math.max(40, 70 - activity * 20);
+            const glowLum = Math.min(95, 70 + activity * 25 + edgeLightIntensity * 15);
+            
+            const glowColor = `hsla(${glowHue},${glowSat}%,${glowLum}%,${glowIntensity})`;
+            drawPolygon([project(A.x, A.y, A.z),
+                        project(B.x, B.y, B.z),
+                        project(C.x, C.y, C.z),
+                        project(D.x, D.y, D.z)], glowColor);
+          }
+          ctx.restore();
+        }
+      }
+    }
+
+    function drawLeftWall() {
+      drawWallWithLight(leftGrid, true, -roomWidth/2, 0);
+    }
+
+    function drawRightWall() {
+      drawWallWithLight(rightGrid, true, roomWidth/2, 0);
+    }
+
+    // --- BACK WALL (base at z = floorZStart + roomDepth, extrusion forward) ---
+    function drawBackWall() {
+      drawWallWithLight(backGrid, false, 0, floorZStart + roomDepth);
+    }
+
+    /***** STATIC ROOM BACKGROUND *****/
+    // Draw the untouched room surfaces so that the extruded clay appears in a full tunnel.
+    function drawRoomBackground() {
+      // Floor.
+      const A = project(-roomWidth / 2, 0, floorZStart);
+      const B = project(roomWidth / 2, 0, floorZStart);
+      const C = project(roomWidth / 2, 0, floorZStart + roomDepth);
+      const D = project(-roomWidth / 2, 0, floorZStart + roomDepth);
+      drawPolygon([A, B, C, D], "#222");
+
+      // Ceiling.
+      const A2 = project(-roomWidth / 2, roomHeight, floorZStart);
+      const B2 = project(roomWidth / 2, roomHeight, floorZStart);
+      const C2 = project(roomWidth / 2, roomHeight, floorZStart + roomDepth);
+      const D2 = project(-roomWidth / 2, roomHeight, floorZStart + roomDepth);
+      drawPolygon([A2, B2, C2, D2], "#333");
+
+      // Left wall.
+      const L1 = project(-roomWidth / 2, 0, floorZStart);
+      const L2 = project(-roomWidth / 2, roomHeight, floorZStart);
+      const L3 = project(-roomWidth / 2, roomHeight, floorZStart + roomDepth);
+      const L4 = project(-roomWidth / 2, 0, floorZStart + roomDepth);
+      drawPolygon([L1, L2, L3, L4], "#444");
+
+      // Right wall.
+      const R1 = project(roomWidth / 2, 0, floorZStart);
+      const R2 = project(roomWidth / 2, roomHeight, floorZStart);
+      const R3 = project(roomWidth / 2, roomHeight, floorZStart + roomDepth);
+      const R4 = project(roomWidth / 2, 0, floorZStart + roomDepth);
+      drawPolygon([R1, R2, R3, R4], "#444");
+
+      // Back wall.
+      const Bk1 = project(-roomWidth / 2, 0, floorZStart + roomDepth);
+      const Bk2 = project(roomWidth / 2, 0, floorZStart + roomDepth);
+      const Bk3 = project(roomWidth / 2, roomHeight, floorZStart + roomDepth);
+      const Bk4 = project(-roomWidth / 2, roomHeight, floorZStart + roomDepth);
+      drawPolygon([Bk1, Bk2, Bk3, Bk4], "#555");
+    }
+
+    /***** TOPOLOGY VISUALIZATION *****/
+    // Function to find local extrema and flickering points
+    function findTopologyPoints() {
+      const threshold = 5; // Minimum height difference to be considered peak/valley
+      const flickerThreshold = 3; // Minimum change to be considered flickering
+      let peaks = [];
+      let valleys = [];
+      flickerPoints = [];
+
+      // Helper to check if point is local maximum/minimum
+      function isLocalExtremum(grid, i, j, type) {
+        const h = grid[i][j];
+        const neighbors = [
+          grid[i-1]?.[j], grid[i+1]?.[j],
+          grid[i]?.[j-1], grid[i]?.[j+1],
+          grid[i-1]?.[j-1], grid[i-1]?.[j+1],
+          grid[i+1]?.[j-1], grid[i+1]?.[j+1]
+        ].filter(x => x !== undefined);
+
+        if (type === 'peak') {
+          return neighbors.every(n => h > n + threshold);
+        } else {
+          return neighbors.every(n => h < n - threshold);
+        }
+      }
+
+      // Process each surface
+      const surfaces = [
+        {grid: floorGrid, name: 'floor', getPos: (i,j) => ({ 
+          x: -roomWidth/2 + i*(roomWidth/gridCols),
+          y: 0,
+          z: floorZStart + j*(roomDepth/gridRows)
+        })},
+        {grid: ceilingGrid, name: 'ceiling', getPos: (i,j) => ({
+          x: -roomWidth/2 + i*(roomWidth/gridCols),
+          y: roomHeight,
+          z: floorZStart + j*(roomDepth/gridRows)
+        })},
+        {grid: leftGrid, name: 'left', getPos: (i,j) => ({
+          x: -roomWidth/2,
+          y: j*(roomHeight/gridRows),
+          z: floorZStart + i*(roomDepth/gridCols)
+        })},
+        {grid: rightGrid, name: 'right', getPos: (i,j) => ({
+          x: roomWidth/2,
+          y: j*(roomHeight/gridRows),
+          z: floorZStart + i*(roomDepth/gridCols)
+        })},
+        {grid: backGrid, name: 'back', getPos: (i,j) => ({
+          x: -roomWidth/2 + i*(roomWidth/gridCols),
+          y: j*(roomHeight/gridRows),
+          z: floorZStart + roomDepth
+        })}
+      ];
+
+      surfaces.forEach(({grid, name, getPos}) => {
+        for (let i = 1; i < gridCols-1; i++) {
+          for (let j = 1; j < gridRows-1; j++) {
+            const pos = getPos(i,j);
+            const h = grid[i][j];
+
+            // Check for peaks and valleys
+            if (isLocalExtremum(grid, i, j, 'peak')) {
+              peaks.push({pos, h, surface: name});
+            } else if (isLocalExtremum(grid, i, j, 'valley')) {
+              valleys.push({pos, h, surface: name});
+            }
+
+            // Check for flickering
+            const prevH = previousGrids[name]?.[i]?.[j];
+            if (prevH !== undefined && Math.abs(h - prevH) > flickerThreshold) {
+              flickerPoints.push({pos, h, surface: name});
+            }
+          }
+        }
+      });
+
+      // Update previous grids for next frame
+      surfaces.forEach(({grid, name}) => {
+        previousGrids[name] = grid.map(row => [...row]);
+      });
+
+      return { peaks, valleys, flickerPoints };
+    }
+
+    // Function to draw topology visualization
+    function drawTopology() {
+      const { peaks, valleys, flickerPoints } = findTopologyPoints();
+      
+      // Draw peaks
+      ctx.fillStyle = 'rgba(255, 200, 100, 0.8)';
+      peaks.forEach(({pos, h}) => {
+        const proj = project(pos.x, pos.y, pos.z);
+        ctx.beginPath();
+        ctx.arc(proj.x, proj.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Draw valleys
+      ctx.fillStyle = 'rgba(100, 150, 255, 0.8)';
+      valleys.forEach(({pos, h}) => {
+        const proj = project(pos.x, pos.y, pos.z);
+        ctx.beginPath();
+        ctx.arc(proj.x, proj.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Draw flicker points with pulsing effect
+      const flickerAlpha = 0.5 + 0.5 * Math.sin(Date.now() * 0.01);
+      ctx.fillStyle = `rgba(255, 255, 255, ${flickerAlpha})`;
+      flickerPoints.forEach(({pos, h}) => {
+        const proj = project(pos.x, pos.y, pos.z);
+        ctx.beginPath();
+        ctx.arc(proj.x, proj.y, 2, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Draw connections between nearby points
+      ctx.strokeStyle = 'rgba(200, 200, 200, 0.3)';
+      ctx.lineWidth = 0.5;
+      const maxDist = roomWidth * 0.2; // Maximum distance for connection
+
+      function drawConnections(points) {
+        for (let i = 0; i < points.length; i++) {
+          for (let j = i + 1; j < points.length; j++) {
+            const p1 = points[i].pos;
+            const p2 = points[j].pos;
+            const dist = Math.sqrt(
+              Math.pow(p1.x - p2.x, 2) +
+              Math.pow(p1.y - p2.y, 2) +
+              Math.pow(p1.z - p2.z, 2)
+            );
+            if (dist < maxDist) {
+              const proj1 = project(p1.x, p1.y, p1.z);
+              const proj2 = project(p2.x, p2.y, p2.z);
+              ctx.beginPath();
+              ctx.moveTo(proj1.x, proj1.y);
+              ctx.lineTo(proj2.x, proj2.y);
+              ctx.stroke();
+            }
+          }
+        }
+      }
+
+      drawConnections([...peaks, ...valleys]);
+    }
+
+    // Add 3D volume grid
+    const volumeGridSize = 20; // Resolution of 3D grid
+    let volumeGrid = Array(volumeGridSize).fill().map(() => 
+      Array(volumeGridSize).fill().map(() => 
+        Array(volumeGridSize).fill(0)
+      )
+    );
+
+    // Function to update the volume based on surface activity
+    function updateVolumeGrid() {
+      // Reset volume grid
+      for(let x = 0; x < volumeGridSize; x++) {
+        for(let y = 0; y < volumeGridSize; y++) {
+          for(let z = 0; z < volumeGridSize; z++) {
+            volumeGrid[x][y][z] = 0;
+          }
+        }
+      }
+
+      // For each point in the volume
+      for(let x = 0; x < volumeGridSize; x++) {
+        for(let y = 0; y < volumeGridSize; y++) {
+          for(let z = 0; z < volumeGridSize; z++) {
+            // Normalize coordinates to 0-1
+            const nx = x / (volumeGridSize - 1);
+            const ny = y / (volumeGridSize - 1);
+            const nz = z / (volumeGridSize - 1);
+
+            // Get closest points on each surface
+            const floorVal = floorGrid[Math.floor(nx * gridCols)][Math.floor(nz * gridRows)];
+            const ceilVal = ceilingGrid[Math.floor(nx * gridCols)][Math.floor(nz * gridRows)];
+            const leftVal = leftGrid[Math.floor(nz * gridCols)][Math.floor(ny * gridRows)];
+            const rightVal = rightGrid[Math.floor(nz * gridCols)][Math.floor(ny * gridRows)];
+            const backVal = backGrid[Math.floor(nx * gridCols)][Math.floor(ny * gridRows)];
+
+            // Calculate influence based on distance from each surface
+            const floorInfluence = floorVal * (1 - ny);
+            const ceilInfluence = ceilVal * ny;
+            const leftInfluence = leftVal * (1 - nx);
+            const rightInfluence = rightVal * nx;
+            const backInfluence = backVal * nz;
+
+            // Combine influences
+            volumeGrid[x][y][z] = Math.max(
+              floorInfluence,
+              ceilInfluence,
+              leftInfluence,
+              rightInfluence,
+              backInfluence
+            );
+          }
+        }
+      }
+    }
+
+    // Light and reflection system
+    const lightSystem = {
+      ambient: { intensity: 0.3, color: [0.1, 0.12, 0.15] },
+      points: [
+        { x: 0, y: roomHeight * 0.8, z: roomDepth * 0.5, 
+          color: [0.8, 0.6, 0.4], intensity: 0.8, pulse: 0.2 },  // Added subtle pulse
+        { x: -roomWidth * 0.3, y: roomHeight * 0.6, z: roomDepth * 0.3, 
+          color: [0.4, 0.6, 0.8], intensity: 0.6, pulse: Math.PI / 3 }
+      ],
+      update() {
+        const time = performance.now() * 0.001;
+        this.points.forEach(light => {
+          if (light.pulse) {
+            light.intensity = 0.6 + Math.sin(time * light.pulse) * 0.3;  // Gentle pulsing
+          }
+        });
+      }
+    };
+
+    function calculateLighting(x, y, z, normal, reflectivity) {
+      let totalLight = [...lightSystem.ambient.color].map(c => c * lightSystem.ambient.intensity);
+      
+      lightSystem.points.forEach(light => {
+        // Calculate light direction and distance
+        const dx = light.x - x;
+        const dy = light.y - y;
+        const dz = light.z - z;
+        const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+        const falloff = 1 / (1 + dist * 0.1);
+        
+        // Normalize light direction
+        const lx = dx / dist;
+        const ly = dy / dist;
+        const lz = dz / dist;
+        
+        // Calculate diffuse lighting
+        const dot = lx * normal[0] + ly * normal[1] + lz * normal[2];
+        const intensity = Math.max(0, dot) * falloff * light.intensity;
+        
+        // Add light contribution
+        totalLight[0] += light.color[0] * intensity * reflectivity;
+        totalLight[1] += light.color[1] * intensity * reflectivity;
+        totalLight[2] += light.color[2] * intensity * reflectivity;
+      });
+      
+      return totalLight;
+    }
+
+    function getShimmerFactor(x, y, z, time) {
+      // Create subtle shimmer using noise
+      const shimmerSpeed = 0.5;
+      const shimmerScale = 0.1;
+      return 0.85 + 0.15 * Math.sin(
+        x * shimmerScale + 
+        y * shimmerScale + 
+        z * shimmerScale + 
+        time * shimmerSpeed
+      );
+    }
+
+    function drawVolumePoints() {
+      const time = performance.now() * 0.001;
+      const pointSize = 2;
+
+      for(let x = 0; x < volumeGridSize; x++) {
+        for(let y = 0; y < volumeGridSize; y++) {
+          for(let z = 0; z < volumeGridSize; z++) {
+            const value = volumeGrid[x][y][z];
+            if(value > 0.1) {
+              const roomX = -roomWidth/2 + (x / (volumeGridSize-1)) * roomWidth;
+              const roomY = (y / (volumeGridSize-1)) * roomHeight;
+              const roomZ = floorZStart + (z / (volumeGridSize-1)) * roomDepth;
+
+              // Calculate normal based on neighboring points
+              const normal = [0, 1, 0]; // Simplified normal for performance
+              
+              // Calculate reflectivity based on value
+              const reflectivity = 0.6 + value * 0.4;
+              
+              // Get lighting at this point
+              const light = calculateLighting(roomX, roomY, roomZ, normal, reflectivity);
+              
+              // Apply shimmer effect
+              const shimmer = getShimmerFactor(roomX, roomY, roomZ, time);
+              
+              const projected = project(roomX, roomY, roomZ);
+              
+              // Create final color with lighting and shimmer
+              const baseHue = 8 + value * 10;
+              const baseSat = Math.min(80, 50 + value * 15);
+              const baseLight = Math.max(25, Math.min(65, 
+                35 + value * 15 + 
+                (light[0] + light[1] + light[2]) * 20 * shimmer
+              ));
+              
+              ctx.fillStyle = `hsla(${baseHue}, ${baseSat}%, ${baseLight}%, ${Math.min(0.6, value * 0.8)})`;
+              ctx.beginPath();
+              ctx.arc(projected.x, projected.y, pointSize * value, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+        }
+      }
+    }
+
+    // Shimmering grid system with orthographic lines
+    const shimmerGrid = {
+      cells: [],
+      gridSize: 32,
+      
+      init() {
+        // Initialize 2D grid for each wall
+        for (let wall = 0; wall < 5; wall++) {
+          this.cells[wall] = Array(this.gridSize).fill().map(() => 
+            Array(this.gridSize).fill().map(() => 
+              Math.random() < 0.2 ? 1 : 0
+            )
+          );
+        }
+      },
+      
+      update() {
+        const time = performance.now() * 0.001;
+        
+        // Update each wall's grid
+        for (let wall = 0; wall < 5; wall++) {
+          const newGrid = Array(this.gridSize).fill().map(() => Array(this.gridSize).fill(0));
+          
+          for (let x = 0; x < this.gridSize; x++) {
+            for (let y = 0; y < this.gridSize; y++) {
+              // Only count orthogonal neighbors (no diagonals)
+              let neighbors = 0;
+              const directions = [[0,1], [0,-1], [1,0], [-1,0]];
+              
+              for (const [dx, dy] of directions) {
+                const nx = (x + dx + this.gridSize) % this.gridSize;
+                const ny = (y + dy + this.gridSize) % this.gridSize;
+                neighbors += this.cells[wall][nx][ny];
+              }
+              
+              // Get volume influence
+              const volumeX = Math.floor((x / this.gridSize) * volumeGridSize);
+              const volumeY = Math.floor((y / this.gridSize) * volumeGridSize);
+              const volumeInfluence = volumeGrid[volumeY]?.[volumeX] || 0;
+              
+              // Modified rules for persistent orthogonal patterns
+              if (this.cells[wall][x][y] === 1) {
+                // Survival rules: stay alive with 1 or 2 orthogonal neighbors
+                newGrid[x][y] = (neighbors >= 1 && neighbors <= 2) ? 1 : 0;
+              } else {
+                // Birth rules: spawn with exactly 1 or 2 orthogonal neighbors
+                const birthChance = 0.3 + volumeInfluence * 0.4;
+                newGrid[x][y] = ((neighbors === 1 || neighbors === 2) && Math.random() < birthChance) ? 1 : 0;
+              }
+              
+              // Preserve some existing patterns
+              if (this.cells[wall][x][y] === 1 && Math.random() < 0.7) {
+                newGrid[x][y] = 1;
+              }
+              
+              // Add occasional sparks along grid lines
+              if (newGrid[x][y] === 0 && Math.random() < 0.005) {
+                if (neighbors > 0) newGrid[x][y] = 1;
+              }
+            }
+          }
+          
+          this.cells[wall] = newGrid;
+        }
+      },
+      
+      drawWallGrid(wallIndex, startX, startY, startZ, normal) {
+        const cellWidth = (normal.x !== 0) ? roomDepth/this.gridSize : roomWidth/this.gridSize;
+        const cellHeight = roomHeight/this.gridSize;
+        
+        ctx.strokeStyle = 'rgba(255, 215, 0, 0.3)';
+        ctx.lineWidth = 1;
+        
+        // Draw only orthogonal lines
+        for (let x = 0; x < this.gridSize; x++) {
+          for (let y = 0; y < this.gridSize; y++) {
+            if (this.cells[wallIndex][x][y]) {
+              // Calculate position
+              let px = startX;
+              let py = startY + y * cellHeight;
+              let pz = startZ;
+              
+              if (normal.x !== 0) {
+                pz = startZ + x * cellWidth;
+              } else if (normal.z !== 0) {
+                px = startX + x * cellWidth;
+              } else {
+                px = startX + x * cellWidth;
+              }
+              
+              const projected = project(px, py, pz);
+              
+              // Draw point
+              const shimmerIntensity = 0.3 + 0.7 * Math.sin(performance.now() * 0.002 + x * 0.1 + y * 0.1);
+              ctx.fillStyle = `rgba(255, 215, 0, ${shimmerIntensity * 0.2})`;
+              ctx.beginPath();
+              ctx.arc(projected.x, projected.y, 2, 0, Math.PI * 2);
+              ctx.fill();
+              
+              // Draw only horizontal and vertical connections
+              ctx.beginPath();
+              const directions = [[0,1], [1,0]]; // Only draw right and down
+              
+              for (const [dx, dy] of directions) {
+                const nx = x + dx;
+                const ny = y + dy;
+                
+                if (nx < this.gridSize && ny < this.gridSize && this.cells[wallIndex][nx][ny]) {
+                  let npx = px, npy = py, npz = pz;
+                  
+                  if (normal.x !== 0) {
+                    npz = startZ + nx * cellWidth;
+                    npy = startY + ny * cellHeight;
+                  } else if (normal.z !== 0) {
+                    npx = startX + nx * cellWidth;
+                    npy = startY + ny * cellHeight;
+                  } else {
+                    npx = startX + nx * cellWidth;
+                    npy = startY + ny * cellHeight;
+                  }
+                  
+                  const neighborProj = project(npx, npy, npz);
+                  ctx.moveTo(projected.x, projected.y);
+                  ctx.lineTo(neighborProj.x, neighborProj.y);
+                }
+              }
+              ctx.stroke();
+            }
+          }
+        }
+      }
+    };
+
+    // Initialize shimmer grid
+    shimmerGrid.init();
+
+    /***** MAIN ANIMATION LOOP *****/
+    function animate() {
+      requestAnimationFrame(animate);
+      updateDeposition();
+      updateErosion();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Update lighting system
+      lightSystem.update();
+      
+      drawRoomBackground();
+      
+      // Draw surfaces with clay extrusion
+      drawFloor();
+      drawCeiling();
+      drawLeftWall();
+      drawRightWall();
+      drawBackWall();
+      
+      // Draw shimmering grid overlay
+      shimmerGrid.draw();
+      
+      updateVolumeGrid();
+      
+      drawVolumePoints();
+      drawTopology();
+    }
+    animate();
+  </script>
+</body>
+</html>

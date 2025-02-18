@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        canvas {
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="cityCanvas"></canvas>
+    <script>
+        const canvas = document.getElementById('cityCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Set canvas size to 3:1 aspect ratio
+        canvas.width = Math.min(window.innerWidth * 0.95, 1200);
+        canvas.height = canvas.width / 3;
+
+        // Constants
+        const BRICK_WIDTH = 8;
+        const BRICK_HEIGHT = 4;
+        const NUM_BUILDERS = 30;
+        const DECAY_RATE = 0.0005;
+        const MAX_HEIGHT = 5;
+
+        // City grid to store brick heights
+        const gridWidth = Math.ceil(canvas.width / BRICK_WIDTH);
+        const gridHeight = Math.ceil(canvas.height / BRICK_HEIGHT);
+        const grid = {
+            heights: new Float32Array(gridWidth * gridHeight),
+            traffic: new Float32Array(gridWidth * gridHeight)
+        };
+
+        // Builder class - more deterministic than previous walkers
+        class Builder {
+            constructor() {
+                this.reset();
+                // Builders now have distinct movement patterns
+                this.type = Math.random() < 0.3 ? 'fast' : 'slow';
+                this.speed = this.type === 'fast' ? 2.0 : 0.5;
+                this.buildRate = this.type === 'fast' ? 0.1 : 0.3;
+            }
+
+            reset() {
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                // More structured initial directions
+                this.angle = Math.round(Math.random() * 4) * Math.PI / 2;
+            }
+
+            build(x, y) {
+                const gridX = Math.floor(x / BRICK_WIDTH);
+                const gridY = Math.floor(y / BRICK_HEIGHT);
+                
+                if (gridX >= 0 && gridX < gridWidth && gridY >= 0 && gridY < gridHeight) {
+                    const index = gridY * gridWidth + gridX;
+                    
+                    // Increment height based on traffic
+                    grid.traffic[index] += this.buildRate;
+                    grid.heights[index] = Math.min(
+                        MAX_HEIGHT,
+                        Math.sqrt(grid.traffic[index])
+                    );
+
+                    // Influence neighboring cells for more structured growth
+                    [-1, 0, 1].forEach(dx => {
+                        [-1, 0, 1].forEach(dy => {
+                            const nx = gridX + dx;
+                            const ny = gridY + dy;
+                            if (nx >= 0 && nx < gridWidth && ny >= 0 && ny < gridHeight) {
+                                const nIndex = ny * gridWidth + nx;
+                                grid.traffic[nIndex] += this.buildRate * 0.1;
+                            }
+                        });
+                    });
+                }
+            }
+
+            update() {
+                // More deterministic movement based on surrounding structure
+                const gridX = Math.floor(this.x / BRICK_WIDTH);
+                const gridY = Math.floor(this.y / BRICK_HEIGHT);
+                
+                if (gridX >= 0 && gridX < gridWidth && gridY >= 0 && gridY < gridHeight) {
+                    // Look ahead in current direction
+                    const lookX = Math.floor((this.x + Math.cos(this.angle) * BRICK_WIDTH * 2) / BRICK_WIDTH);
+                    const lookY = Math.floor((this.y + Math.sin(this.angle) * BRICK_HEIGHT * 2) / BRICK_HEIGHT);
+                    
+                    if (lookX < 0 || lookX >= gridWidth || lookY < 0 || lookY >= gridHeight) {
+                        // Turn at boundaries
+                        this.angle = Math.round(Math.random() * 4) * Math.PI / 2;
+                    } else {
+                        const lookIndex = lookY * gridWidth + lookX;
+                        const currentIndex = gridY * gridWidth + gridX;
+                        
+                        // Turn if approaching higher structure or at regular intervals
+                        if (grid.heights[lookIndex] > grid.heights[currentIndex] + 1 ||
+                            Math.random() < 0.02) {
+                            this.angle += Math.PI / 2 * (Math.random() < 0.5 ? 1 : -1);
+                        }
+                    }
+                }
+
+                // Move and build
+                this.x += Math.cos(this.angle) * this.speed;
+                this.y += Math.sin(this.angle) * this.speed;
+                
+                // Wrap around edges
+                this.x = (this.x + canvas.width) % canvas.width;
+                this.y = (this.y + canvas.height) % canvas.height;
+                
+                // Build at current position
+                this.build(this.x, this.y);
+            }
+        }
+
+        // Create builders
+        const builders = Array.from({ length: NUM_BUILDERS }, () => new Builder());
+
+        // Function to draw a single brick with height
+        function drawBrick(x, y, width, height, heightValue) {
+            const baseColor = [180, 100, 60]; // Brick base color
+            const topColor = [220, 140, 80]; // Brick top color
+            const shade = Math.max(0.4, Math.min(1, heightValue / MAX_HEIGHT));
+            
+            // Draw main brick body
+            ctx.fillStyle = `rgb(${baseColor[0] * shade}, ${baseColor[1] * shade}, ${baseColor[2] * shade})`;
+            ctx.fillRect(x, y, width, height);
+            
+            // Draw top edge for height
+            ctx.fillStyle = `rgb(${topColor[0] * shade}, ${topColor[1] * shade}, ${topColor[2] * shade})`;
+            ctx.fillRect(x, y - heightValue * 2, width, 2);
+        }
+
+        // Animation loop
+        function animate() {
+            // Clear canvas
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Update and draw grid
+            for (let y = 0; y < gridHeight; y++) {
+                for (let x = 0; x < gridWidth; x++) {
+                    const index = y * gridWidth + x;
+                    
+                    // Apply decay
+                    grid.traffic[index] = Math.max(0, grid.traffic[index] - DECAY_RATE);
+                    grid.heights[index] = Math.max(0, Math.sqrt(grid.traffic[index]));
+
+                    // Draw brick if it has height
+                    if (grid.heights[index] > 0) {
+                        drawBrick(
+                            x * BRICK_WIDTH,
+                            y * BRICK_HEIGHT + BRICK_HEIGHT,
+                            BRICK_WIDTH - 1,
+                            BRICK_HEIGHT - 1,
+                            grid.heights[index]
+                        );
+                    }
+                }
+            }
+
+            // Update builders
+            builders.forEach(builder => builder.update());
+
+            requestAnimationFrame(animate);
+        }
+
+        // Start animation
+        animate();
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = Math.min(window.innerWidth * 0.95, 1200);
+            canvas.height = canvas.width / 3;
+            // Reset grid size and data
+            const newGridWidth = Math.ceil(canvas.width / BRICK_WIDTH);
+            const newGridHeight = Math.ceil(canvas.height / BRICK_HEIGHT);
+            grid.heights = new Float32Array(newGridWidth * newGridHeight);
+            grid.traffic = new Float32Array(newGridWidth * newGridHeight);
+        });
+    </script>
+</body>
+</html>

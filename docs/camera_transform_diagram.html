@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Camera Transform System - Multiple Views</title>
+    <style>
+        body { 
+            margin: 0; 
+            background: #1a1a1a;
+            color: white;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            width: 800px;
+            padding: 20px;
+        }
+        canvas {
+            border: 1px solid #333;
+            margin: 20px 0;
+            background: #1a1a1a;
+        }
+        .title {
+            text-align: center;
+            font-size: 24px;
+            margin: 20px 0;
+            color: white;
+        }
+        .view-container {
+            margin: 40px 0;
+        }
+        .view-title {
+            font-size: 16px;
+            margin-bottom: 5px;
+            color: #ccc;
+        }
+        .view-subtitle {
+            font-size: 14px;
+            color: #888;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="title">Camera Transform System</div>
+        
+        <div class="view-container">
+            <div class="view-title">Top View</div>
+            <div class="view-subtitle">Physical setup with camera and pedestrians</div>
+            <canvas id="topView" width="800" height="400"></canvas>
+        </div>
+
+        <div class="view-container">
+            <div class="view-title">Side View</div>
+            <div class="view-subtitle">Camera transformation process</div>
+            <canvas id="sideView" width="800" height="400"></canvas>
+        </div>
+    </div>
+
+    <script>
+        function drawTopView() {
+            const canvas = document.getElementById('topView');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Center origin
+            ctx.translate(canvas.width/2, canvas.height/2);
+            
+            // Draw ground grid
+            ctx.strokeStyle = '#333';
+            ctx.beginPath();
+            for(let x = -300; x <= 300; x += 30) {
+                ctx.moveTo(x, -150);
+                ctx.lineTo(x, 150);
+            }
+            for(let y = -150; y <= 150; y += 30) {
+                ctx.moveTo(-300, y);
+                ctx.lineTo(300, y);
+            }
+            ctx.stroke();
+            
+            // Draw bridge
+            ctx.fillStyle = '#4287f5';
+            ctx.globalAlpha = 0.8;
+            ctx.fillRect(-150, -20, 300, 40);
+            ctx.globalAlpha = 1.0;
+            
+            // Draw camera
+            ctx.fillStyle = 'red';
+            ctx.beginPath();
+            ctx.moveTo(0, 20);
+            ctx.lineTo(-10, 35);
+            ctx.lineTo(10, 35);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Draw camera view area
+            ctx.fillStyle = 'rgba(255,0,0,0.1)';
+            ctx.strokeStyle = 'rgba(255,0,0,0.3)';
+            ctx.beginPath();
+            ctx.moveTo(0, 20);
+            ctx.lineTo(-80, 120);
+            ctx.lineTo(80, 120);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            
+            // Draw pedestrian area
+            ctx.strokeStyle = '#00ff00';
+            ctx.strokeRect(-80, 40, 160, 60);
+            
+            // Draw pedestrians
+            [-60, -30, 0, 30, 60].forEach((x, i) => {
+                const y = 70 + Math.sin(Date.now()/1000 + i) * 15;
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.beginPath();
+                ctx.ellipse(x, y + 5, 8, 4, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = 'yellow';
+                ctx.beginPath();
+                ctx.arc(x, y, 5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            // Reset transform
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+        }
+
+        function drawSideView() {
+            const canvas = document.getElementById('sideView');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Center origin
+            ctx.translate(200, canvas.height/2);
+            
+            // Draw ground grid
+            ctx.strokeStyle = '#333';
+            ctx.beginPath();
+            for(let x = -150; x <= 500; x += 30) {
+                ctx.moveTo(x, 100);
+                ctx.lineTo(x, -100);
+            }
+            for(let y = -100; y <= 100; y += 30) {
+                ctx.moveTo(-150, y);
+                ctx.lineTo(500, y);
+            }
+            ctx.stroke();
+            
+            // Draw bridge
+            ctx.fillStyle = '#4287f5';
+            ctx.globalAlpha = 0.8;
+            ctx.fillRect(-75, -50, 150, 20);
+            ctx.globalAlpha = 1.0;
+            
+            // Draw camera
+            ctx.fillStyle = 'red';
+            ctx.fillRect(-10, -30, 20, 10);
+            
+            // Draw camera view
+            ctx.fillStyle = 'rgba(255,0,0,0.1)';
+            ctx.strokeStyle = 'rgba(255,0,0,0.3)';
+            ctx.beginPath();
+            ctx.moveTo(0, -30);
+            ctx.lineTo(-80, 50);
+            ctx.lineTo(80, 50);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            
+            // Draw pedestrians in real view
+            [-60, -30, 0, 30, 60].forEach(x => {
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.beginPath();
+                ctx.ellipse(x, 45, 8, 4, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = 'yellow';
+                ctx.beginPath();
+                ctx.arc(x, 40, 5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            // Draw transform box
+            ctx.translate(300, 0);
+            ctx.strokeStyle = '#00ff00';
+            ctx.strokeRect(-40, -80, 80, 160);
+            ctx.fillStyle = '#00ff00';
+            ctx.font = '14px Arial';
+            ctx.fillText('Transform', -30, 0);
+            
+            // Draw virtual view
+            ctx.translate(150, 0);
+            ctx.strokeStyle = '#00ffff';
+            ctx.strokeRect(-80, -80, 160, 160);
+            ctx.fillStyle = '#00ffff';
+            ctx.font = '14px Arial';
+            ctx.fillText('Virtual View', -35, -90);
+            
+            // Draw transformed pedestrians
+            ctx.fillStyle = 'yellow';
+            [-60, -30, 0, 30, 60].forEach(x => {
+                const scaledX = x * 0.8;
+                ctx.beginPath();
+                ctx.arc(scaledX, 0, 5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            // Reset transform
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+        }
+
+        function animate() {
+            drawTopView();
+            drawSideView();
+            requestAnimationFrame(animate);
+        }
+        animate();
+    </script>
+</body>
+</html>

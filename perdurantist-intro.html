@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Ensure a proper mobile viewport -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Experimental Prototype</title>
+    <style>
+      /* Basic reset and full-screen canvas */
+      html, body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #000;
+        height: 100%;
+      }
+      canvas {
+        display: block;
+      }
+      /* (Optional) Message overlay */
+      #message {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        color: #fff;
+        font-family: sans-serif;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 4px 8px;
+        border-radius: 4px;
+        z-index: 10;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Hidden video element for camera feed -->
+    <video id="video" autoplay playsinline style="display:none;"></video>
+    <!-- Canvas used for drawing our experimental output -->
+    <canvas id="canvas"></canvas>
+    <!-- (Optional) Message to instruct the user -->
+    <div id="message">Point your camera at some movement!</div>
+
+    <script>
+      // Get elements
+      const video = document.getElementById("video");
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+
+      // Make sure our canvas fills the screen
+      let width, height;
+      function resizeCanvas() {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = width;
+        canvas.height = height;
+      }
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+
+      // Set up an offscreen canvas to process the video frames.
+      // We will draw the video onto this canvas (sized to match our main canvas)
+      // so that we can extract pixel data.
+      const offCanvas = document.createElement("canvas");
+      const offCtx = offCanvas.getContext("2d");
+      offCanvas.width = width;
+      offCanvas.height = height;
+
+      // Our processing “pipeline”:
+      // Camera Feed ═[captures]═≻ Pixel Matrix
+      // Pixel Matrix ═[differs]═≻ Motion Vector Field
+      // Motion Vector Field ═[decays]═≻ Temporal Grid
+      // Temporal Grid ═[projects]≻ Perspective Space
+      // Perspective Space ═[materializes]≻ Persistent Bricks
+
+      // We use frame-to-frame differences to detect motion.
+      // A translucent overlay on our canvas makes bricks persist and then fade (decay).
+      let prevImageData = null;
+
+      // Request camera access (note: must be served over HTTPS)
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices
+          .getUserMedia({
+            video: { facingMode: "environment" },
+            audio: false
+          })
+          .then((stream) => {
+            video.srcObject = stream;
+            video.play();
+          })
+          .catch((err) => {
+            console.error("Error accessing camera: ", err);
+            document.getElementById("message").innerText =
+              "Camera access denied or not available.";
+          });
+      } else {
+        document.getElementById("message").innerText =
+          "getUserMedia is not supported in your browser.";
+      }
+
+      // Our main animation loop.
+      function animate() {
+        requestAnimationFrame(animate);
+
+        // Proceed only if we have enough video data.
+        if (video.readyState === video.HAVE_ENOUGH_DATA) {
+          // Each frame the canvas is not cleared entirely.
+          // Instead we overlay a semi‑transparent rectangle so that
+          // “Persistent Bricks” gradually decay.
+          ctx.fillStyle = "rgba(0, 0, 0, 0.1)";
+          ctx.fillRect(0, 0, width, height);
+
+          // Draw the current video frame into our offscreen canvas.
+          offCtx.drawImage(video, 0, 0, width, height);
+          let imageData = offCtx.getImageData(0, 0, width, height);
+
+          // If we have a previous frame, compute differences.
+          if (prevImageData) {
+            // Set up a grid over the canvas.
+            const cellSize = 10; // Size of each grid cell (adjust for performance/quality)
+            for (let y = 0; y < height; y += cellSize) {
+              for (let x = 0; x < width; x += cellSize) {
+                let sumDiff = 0;
+                let count = 0;
+                // Loop over each pixel in the grid cell.
+                for (let j = 0; j < cellSize; j++) {
+                  for (let i = 0; i < cellSize; i++) {
+                    const px = x + i;
+                    const py = y + j;
+                    if (px < width && py < height) {
+                      const index = (py * width + px) * 4;
+                      const rDiff = Math.abs(
+                        imageData.data[index] - prevImageData.data[index]
+                      );
+                      const gDiff = Math.abs(
+                        imageData.data[index + 1] -
+                          prevImageData.data[index + 1]
+                      );
+                      const bDiff = Math.abs(
+                        imageData.data[index + 2] -
+                          prevImageData.data[index + 2]
+                      );
+                      const diff = (rDiff + gDiff + bDiff) / 3;
+                      sumDiff += diff;
+                      count++;
+                    }
+                  }
+                }
+                const avgDiff = sumDiff / count;
+                const threshold = 20; // Tune to adjust sensitivity
+
+                // If the difference (motion) is significant, “materialize” a brick.
+                if (avgDiff > threshold) {
+                  // Simulate a perspective projection: cells lower on the screen
+                  // (larger y) get a larger scale factor.
+                  const scaleFactor = 0.5 + (y / height);
+                  const brickWidth = cellSize * scaleFactor;
+                  const brickHeight = cellSize * scaleFactor;
+                  // Center the brick inside its cell.
+                  const brickX = x + (cellSize - brickWidth) / 2;
+                  const brickY = y + (cellSize - brickHeight) / 2;
+                  // Brick opacity is proportional to motion intensity.
+                  const alpha = Math.min(1, avgDiff / 255);
+                  ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                  ctx.fillRect(brickX, brickY, brickWidth, brickHeight);
+                }
+              }
+            }
+          }
+          // Save the current frame for next time.
+          prevImageData = imageData;
+        }
+      }
+      animate();
+    </script>
+  </body>
+</html>

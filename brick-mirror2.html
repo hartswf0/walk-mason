@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        canvas { display: block; }
+        #cameraFeed {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            width: 160px;
+            opacity: 0.8;
+            border: 2px solid #fff;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="cityCanvas"></canvas>
+    <video id="cameraFeed" autoplay muted></video>
+    <script>
+        const canvas = document.getElementById('cityCanvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('cameraFeed');
+
+        // Setup
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        const BRICK_SIZE = 20; // Smaller bricks for more detail
+        const MAX_DEPTH = 40;
+        const GRID = [];
+        const MOTION_HISTORY_SIZE = 20;
+        const DECAY_RATE = 0.015;
+        const MIN_OPACITY = 0.08;
+        const MAX_OPACITY = 0.75; // Higher max opacity for stronger pixels
+        const MATURITY_THRESHOLD = 100;
+        const RIPPLE_SPEED = 0.3;
+        const MEMORY_INFLUENCE = 0.9;
+        const COLLISION_RADIUS = 2;
+        const CHAIN_REACTION_CHANCE = 0.3;
+        const BRICK_CREATION_THRESHOLD = 0.015; // Easier to create bricks
+        const BRICK_GROWTH_RATE = 0.25; // Faster growth
+        const BRICK_TRANSITION_SPEED = 0.15;
+        const ACTIVATION_INTERVAL = 800;
+        const BASE_PROTECTION_RADIUS = 180;
+        const NEGATIVE_SPACE_MIN = 0.4;
+        const BALL_TRAIL_LENGTH = 20;
+        const MEGA_BALL_CHANCE = 0.15;
+        const MEGA_BALL_SCALE = 2.5;
+        const BRICK_BREAKER_INTERVAL = 15000;
+        const ADVERSARY_SPAWN_INTERVAL = 12000;
+        const MAX_ADVERSARIES = 2;
+        const COLOR_SHIFT_SPEED = 0.001;
+        const INVERSION_THRESHOLD = 0.5;
+        const CLEAR_ALPHA = 0.2;
+        const MOTION_SENSITIVITY = 3.5; // More sensitive to motion
+        const COLOR_MEMORY_DECAY = 0.05;
+        const COLOR_QUANTIZE_LEVELS = 8; // For more pixel-art look
+        const LAYER_COUNT = 3; // Multiple layers of bricks
+
+        // Earth tone color palette parameters
+        const colorState = {
+            time: 0,
+            baseHue: 30,
+            hueRange: 30, 
+            saturationBase: 40, 
+            saturationRange: 30,
+            luminosityBase: 60,
+            luminosityRange: 30
+        };
+        
+        // Material evolution stages
+        const MATERIALS = [
+            { name: 'earth', hue: 30, saturation: 30, luminosity: 40 },
+            { name: 'clay', hue: 25, saturation: 40, luminosity: 45 },
+            { name: 'copper', hue: 20, saturation: 60, luminosity: 50 },
+            { name: 'bronze', hue: 35, saturation: 70, luminosity: 55 },
+            { name: 'silver', hue: 210, saturation: 20, luminosity: 70 },
+            { name: 'gold', hue: 45, saturation: 80, luminosity: 65 },
+            { name: 'platinum', hue: 200, saturation: 10, luminosity: 80 }
+        ];
+        
+        // Ball physics constants
+        const BALL_RADIUS = 12;
+        const INITIAL_BALL_SPEED = 4; 
+        const MAX_BALLS = 50;
+        const PADDLE_WIDTH = 120;
+        const PADDLE_HEIGHT = 15;
+        const NUM_PADDLES = 4;
+        
+        // Game state
+        const balls = [];
+        const paddles = [];
+        const adversaries = [];
+        let gameStarted = false;
+        let initialCleared = false;
+        let lastActivationTime = 0;
+        let lastBrickBreakerTime = 0;
+        let lastAdversaryTime = 0;
+        let mouseX = 0;
+        let mouseY = 0;
+        
+        function initGrid() {
+            const cols = Math.ceil(canvas.width / BRICK_SIZE);
+            const rows = Math.ceil(canvas.height / BRICK_SIZE);
+            
+            for(let x = 0; x < cols; x++) {
+                GRID[x] = [];
+                for(let y = 0; y < rows; y++) {
+                    GRID[x][y] = {
+                        layers: Array(LAYER_COUNT).fill().map(() => ({
+                            opacity: 0,
+                            depth: 0,
+                            energy: 0,
+                            color: { h: 0, s: 0, l: 50 },
+                            targetColor: { h: 0, s: 0, l: 50 }
+                        })),
+                        motionHistory: new Array(MOTION_HISTORY_SIZE).fill(0),
+                        averageMotion: 0
+                    };
+                }
+            }
+        }
+
+        initGrid();
+
+        // Connect neighboring cells with distance information
+        for(let x = 0; x < GRID.length; x++) {
+            for(let y = 0; y < GRID[x].length; y++) {
+                const cell = GRID[x][y];
+                for(let dx = -2; dx <= 2; dx++) {
+                    for(let dy = -2; dy <= 2; dy++) {
+                        if(dx === 0 && dy === 0) continue;
+                        if(GRID[x+dx] && GRID[x+dx][y+dy]) {
+                            const distance = Math.sqrt(dx*dx + dy*dy);
+                            cell.neighbors = cell.neighbors || [];
+                            cell.neighbors.push({
+                                cell: GRID[x+dx][y+dy],
+                                distance: distance
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        function isInProtectedZone(x, y) {
+            const dx = x * BRICK_SIZE + BRICK_SIZE/2 - mouseX;
+            const dy = y * BRICK_SIZE + BRICK_SIZE/2 - mouseY;
+            return Math.sqrt(dx * dx + dy * dy) < BASE_PROTECTION_RADIUS;
+        }
+        
+        function calculateNegativeSpaceRatio() {
+            let emptyCount = 0;
+            let totalCount = GRID.length * GRID[0].length;
+            
+            for(let x = 0; x < GRID.length; x++) {
+                for(let y = 0; y < GRID[0].length; y++) {
+                    if(GRID[x][y].layers[0].opacity < 0.2) emptyCount++;
+                }
+            }
+            
+            return emptyCount / totalCount;
+        }
+
+        // Propagate ripples through the grid
+        function propagateRipples(x, y, intensity) {
+            const cell = GRID[x][y];
+            const maxRadius = 3; 
+            
+            for(let dx = -maxRadius; dx <= maxRadius; dx++) {
+                for(let dy = -maxRadius; dy <= maxRadius; dy++) {
+                    const targetX = x + dx;
+                    const targetY = y + dy;
+                    
+                    if(targetX >= 0 && targetX < GRID.length && 
+                       targetY >= 0 && targetY < GRID[0].length) {
+                        const distance = Math.sqrt(dx*dx + dy*dy);
+                        if(distance <= maxRadius) {
+                            const targetCell = GRID[targetX][targetY];
+                            const rippleIntensity = (1 - distance/maxRadius) * intensity * RIPPLE_SPEED;
+                            targetCell.layers.forEach(layer => {
+                                layer.energy = Math.min(1, layer.energy + rippleIntensity * 0.3);
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        function getInvertedColor(color) {
+            return {
+                hue: (color.hue + 180) % 360,
+                saturation: 100 - color.saturation,
+                luminosity: 100 - color.luminosity
+            };
+        }
+        
+        function getEarthTone(energy, depth, opacity) {
+            // Base color calculation with more contrast
+            const shiftedHue = (colorState.baseHue + 
+                Math.sin(colorState.time) * colorState.hueRange + 
+                energy * 20) % 360;
+            
+            const saturation = colorState.saturationBase + 
+                Math.cos(colorState.time * 0.7) * colorState.saturationRange + 
+                depth * 30;
+            
+            const luminosity = colorState.luminosityBase + 
+                Math.sin(colorState.time * 0.5) * colorState.luminosityRange + 
+                energy * 25;
+            
+            const baseColor = {
+                hue: shiftedHue,
+                saturation: Math.min(100, Math.max(20, saturation)), 
+                luminosity: Math.min(90, Math.max(30, luminosity)) 
+            };
+            
+            // More dramatic inversion
+            if (opacity < INVERSION_THRESHOLD) {
+                const invertedColor = getInvertedColor(baseColor);
+                const blend = Math.pow(opacity / INVERSION_THRESHOLD, 0.7); 
+                
+                return {
+                    hue: invertedColor.hue * (1 - blend) + baseColor.hue * blend,
+                    saturation: invertedColor.saturation * (1 - blend) + baseColor.saturation * blend,
+                    luminosity: invertedColor.luminosity * (1 - blend) + baseColor.luminosity * blend
+                };
+            }
+            
+            return baseColor;
+        }
+
+        function quantizeColor(color) {
+            // Quantize colors for more pixel-art look
+            return {
+                h: Math.round(color.h / (360/COLOR_QUANTIZE_LEVELS)) * (360/COLOR_QUANTIZE_LEVELS),
+                s: Math.round(color.s / (100/COLOR_QUANTIZE_LEVELS)) * (100/COLOR_QUANTIZE_LEVELS),
+                l: Math.round(color.l / (100/COLOR_QUANTIZE_LEVELS)) * (100/COLOR_QUANTIZE_LEVELS)
+            };
+        }
+
+        // Initialize paddles
+        for (let i = 0; i < NUM_PADDLES; i++) {
+            paddles.push({
+                x: 0,
+                y: 0,
+                angle: (i * Math.PI * 2) / NUM_PADDLES 
+            });
+        }
+        
+        function updatePaddlePositions(mouseX, mouseY) {
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const radius = Math.min(canvas.width, canvas.height) * 0.4;
+            
+            paddles.forEach((paddle, i) => {
+                // Calculate base position on circle
+                const baseAngle = paddle.angle + (mouseX - centerX) * 0.002;
+                paddle.x = centerX + Math.cos(baseAngle) * radius - PADDLE_WIDTH/2;
+                paddle.y = centerY + Math.sin(baseAngle) * radius;
+                
+                // Ensure paddles stay within canvas
+                paddle.x = Math.max(0, Math.min(canvas.width - PADDLE_WIDTH, paddle.x));
+                paddle.y = Math.max(PADDLE_HEIGHT, Math.min(canvas.height - PADDLE_HEIGHT, paddle.y));
+            });
+        }
+        
+        class Ball {
+            constructor(x, y, angle, isMega = false) {
+                this.x = x;
+                this.y = y;
+                this.angle = angle;
+                this.isMega = isMega;
+                this.radius = isMega ? BALL_RADIUS * MEGA_BALL_SCALE : BALL_RADIUS;
+                this.speed = isMega ? INITIAL_BALL_SPEED * 0.7 : INITIAL_BALL_SPEED;
+                this.dx = Math.cos(angle) * this.speed;
+                this.dy = Math.sin(angle) * this.speed;
+                this.energy = isMega ? 2 : 1;
+                this.trail = [];
+                this.destroyedBricks = new Set();
+            }
+            
+            update() {
+                this.trail.push({x: this.x, y: this.y});
+                if (this.trail.length > BALL_TRAIL_LENGTH) this.trail.shift();
+                
+                // Update position
+                this.x += this.dx;
+                this.y += this.dy;
+                
+                // Handle collisions
+                this.handleCollisions();
+                
+                // Check if ball is below paddle
+                if (this.y > canvas.height + BALL_RADIUS) {
+                    return false;
+                }
+                
+                return true;
+            }
+            
+            draw() {
+                // Draw enhanced trail
+                this.trail.forEach((pos, i) => {
+                    const alpha = i / this.trail.length;
+                    const size = this.radius * (0.5 + alpha * 0.5);
+                    const energy = pos.energy || 1;
+                    
+                    const hue = this.isMega ? 45 : 30; 
+                    ctx.fillStyle = `hsla(${hue}, 
+                        ${70 + energy * 30}%, 
+                        ${50 + energy * 20}%, 
+                        ${alpha * 0.4})`;
+                    ctx.beginPath();
+                    ctx.arc(pos.x, pos.y, size, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+                
+                // Draw glowing ball
+                const gradient = ctx.createRadialGradient(
+                    this.x, this.y, 0,
+                    this.x, this.y, this.radius * 1.5
+                );
+                const hue = this.isMega ? 45 : 30;
+                gradient.addColorStop(0, `hsla(${hue}, 100%, 70%, 0.8)`);
+                gradient.addColorStop(1, `hsla(${hue}, 70%, 50%, 0)`);
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius * 1.5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = `hsla(${hue}, 100%, 70%, 0.9)`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            handleCollisions() {
+                // Enhanced collision handling
+                const centerX = Math.floor(this.x / BRICK_SIZE);
+                const centerY = Math.floor(this.y / BRICK_SIZE);
+                
+                for(let dx = -COLLISION_RADIUS; dx <= COLLISION_RADIUS; dx++) {
+                    for(let dy = -COLLISION_RADIUS; dy <= COLLISION_RADIUS; dy++) {
+                        const checkX = centerX + dx;
+                        const checkY = centerY + dy;
+                        
+                        if (checkX >= 0 && checkX < GRID.length && 
+                            checkY >= 0 && checkY < GRID[0].length) {
+                            const cell = GRID[checkX][checkY];
+                            const key = `${checkX},${checkY}`;
+                            
+                            if (cell.layers[0].opacity > 0.2 && !this.destroyedBricks.has(key)) {
+                                const brickX = checkX * BRICK_SIZE;
+                                const brickY = checkY * BRICK_SIZE;
+                                
+                                if (this.x > brickX - BALL_RADIUS && 
+                                    this.x < brickX + BRICK_SIZE + BALL_RADIUS &&
+                                    this.y > brickY - BALL_RADIUS && 
+                                    this.y < brickY + BRICK_SIZE + BALL_RADIUS) {
+                                    
+                                    // Don't destroy protected bricks
+                                    if (!isInProtectedZone(checkX, checkY)) {
+                                        // Check negative space ratio before destroying
+                                        if (calculateNegativeSpaceRatio() > NEGATIVE_SPACE_MIN) {
+                                            cell.layers.forEach(layer => {
+                                                layer.opacity = 0;
+                                                layer.depth = 0;
+                                                layer.energy = 0;
+                                            });
+                                            this.destroyedBricks.add(key);
+                                            propagateRipples(checkX, checkY, 1);
+                                            
+                                            if (balls.length < MAX_BALLS && Math.random() < CHAIN_REACTION_CHANCE) {
+                                                const newAngle = Math.random() * Math.PI * 2;
+                                                balls.push(new Ball(this.x, this.y, newAngle));
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Bounce with energy transfer
+                                    const centerBrickX = brickX + BRICK_SIZE/2;
+                                    const centerBrickY = brickY + BRICK_SIZE/2;
+                                    const angle = Math.atan2(this.y - centerBrickY, this.x - centerBrickX);
+                                    
+                                    this.dx = Math.cos(angle) * this.speed;
+                                    this.dy = Math.sin(angle) * this.speed;
+                                    
+                                    // Add energy to trail
+                                    this.trail.forEach(pos => pos.energy = 1.5);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        class Adversary {
+            constructor() {
+                // Random start position along the edges
+                const side = Math.floor(Math.random() * 4);
+                switch(side) {
+                    case 0: // Top
+                        this.x = Math.random() * canvas.width;
+                        this.y = 0;
+                        break;
+                    case 1: // Right
+                        this.x = canvas.width;
+                        this.y = Math.random() * canvas.height;
+                        break;
+                    case 2: // Bottom
+                        this.x = Math.random() * canvas.width;
+                        this.y = canvas.height;
+                        break;
+                    case 3: // Left
+                        this.x = 0;
+                        this.y = Math.random() * canvas.height;
+                        break;
+                }
+                
+                this.speed = 3; 
+                this.size = 45; 
+                this.energy = 1;
+                this.destroyRadius = 4; 
+                this.lastAttackTime = 0;
+                this.attackInterval = 800; 
+                this.trail = [];
+                this.destroyStrength = 0.5; 
+            }
+            
+            update() {
+                // Move towards densest brick area
+                let targetX = canvas.width/2;
+                let targetY = canvas.height/2;
+                let maxDensity = 0;
+                
+                // Find densest 5x5 brick area
+                for(let x = 2; x < GRID.length-2; x++) {
+                    for(let y = 2; y < GRID[0].length-2; y++) {
+                        let density = 0;
+                        for(let dx = -2; dx <= 2; dx++) {
+                            for(let dy = -2; dy <= 2; dy++) {
+                                density += GRID[x+dx][y+dy].layers[0].opacity;
+                            }
+                        }
+                        if(density > maxDensity) {
+                            maxDensity = density;
+                            targetX = x * BRICK_SIZE;
+                            targetY = y * BRICK_SIZE;
+                        }
+                    }
+                }
+                
+                // Move towards target
+                const angle = Math.atan2(targetY - this.y, targetX - this.x);
+                this.x += Math.cos(angle) * this.speed;
+                this.y += Math.sin(angle) * this.speed;
+                
+                // Update trail
+                this.trail.push({x: this.x, y: this.y});
+                if(this.trail.length > 15) this.trail.shift();
+                
+                // Attack nearby bricks
+                const currentTime = performance.now();
+                if(currentTime - this.lastAttackTime > this.attackInterval) {
+                    this.lastAttackTime = currentTime;
+                    
+                    const gridX = Math.floor(this.x / BRICK_SIZE);
+                    const gridY = Math.floor(this.y / BRICK_SIZE);
+                    
+                    for(let dx = -this.destroyRadius; dx <= this.destroyRadius; dx++) {
+                        for(let dy = -this.destroyRadius; dy <= this.destroyRadius; dy++) {
+                            const x = gridX + dx;
+                            const y = gridY + dy;
+                            
+                            if(x >= 0 && x < GRID.length && y >= 0 && y < GRID[0].length) {
+                                const cell = GRID[x][y];
+                                if(cell.layers[0].opacity > 0.2 && !isInProtectedZone(x, y)) {
+                                    cell.layers.forEach(layer => {
+                                        layer.opacity *= (1 - this.destroyStrength);
+                                        layer.depth *= (1 - this.destroyStrength);
+                                    });
+                                    propagateRipples(x, y, 0.8);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                return true;
+            }
+            
+            draw() {
+                // Draw trail with more contrast
+                this.trail.forEach((pos, i) => {
+                    const alpha = i / this.trail.length;
+                    ctx.fillStyle = `hsla(0, 100%, 60%, ${alpha * 0.4})`;
+                    ctx.beginPath();
+                    ctx.arc(pos.x, pos.y, this.size * (0.5 + alpha * 0.5), 0, Math.PI * 2);
+                    ctx.fill();
+                });
+                
+                // Draw adversary with more contrast
+                const gradient = ctx.createRadialGradient(
+                    this.x, this.y, 0,
+                    this.x, this.y, this.size
+                );
+                gradient.addColorStop(0, 'hsla(0, 100%, 70%, 0.9)');
+                gradient.addColorStop(1, 'hsla(0, 100%, 40%, 0)');
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw core with more intensity
+                ctx.fillStyle = 'hsla(0, 100%, 60%, 0.95)';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size * 0.6, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        function activateBall() {
+            if (balls.length >= MAX_BALLS) return;
+            
+            // Find nearest paddle to mouse
+            let nearestPaddle = paddles[0];
+            let minDist = Infinity;
+            
+            paddles.forEach(paddle => {
+                const dx = paddle.x + PADDLE_WIDTH/2 - mouseX;
+                const dy = paddle.y + PADDLE_HEIGHT/2 - mouseY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < minDist) {
+                    minDist = dist;
+                    nearestPaddle = paddle;
+                }
+            });
+            
+            const angle = Math.atan2(
+                mouseY - nearestPaddle.y,
+                mouseX - nearestPaddle.x
+            ) + (Math.random() - 0.5) * Math.PI/4;
+            
+            // Chance to create mega ball
+            const isMega = Math.random() < MEGA_BALL_CHANCE;
+            
+            const ball = new Ball(
+                nearestPaddle.x + PADDLE_WIDTH/2,
+                nearestPaddle.y,
+                angle,
+                isMega
+            );
+            
+            // Initialize full trail
+            ball.trail = Array(BALL_TRAIL_LENGTH).fill({
+                x: ball.x,
+                y: ball.y,
+                energy: isMega ? 2 : 1
+            });
+            
+            balls.push(ball);
+            createRippleAtBall(ball);
+        }
+        
+        function createRippleAtBall(ball) {
+            const gridX = Math.floor(ball.x / BRICK_SIZE);
+            const gridY = Math.floor(ball.y / BRICK_SIZE);
+            if (gridX >= 0 && gridX < GRID.length && 
+                gridY >= 0 && gridY < GRID[0].length) {
+                propagateRipples(gridX, gridY, ball.energy);
+            }
+        }
+        
+        // Time-based movement patterns
+        const time = {
+            value: 0,
+            increment: 0.01
+        };
+        
+        // Handle mouse movement and clicks
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = e.clientX - rect.left;
+            mouseY = e.clientY - rect.top;
+            
+            updatePaddlePositions(mouseX, mouseY);
+            
+            if (!gameStarted) {
+                gameStarted = true;
+                activateBall();
+            }
+        });
+        
+        canvas.addEventListener('click', () => {
+            const currentTime = performance.now();
+            if (currentTime - lastActivationTime > ACTIVATION_INTERVAL) {
+                activateBall();
+                lastActivationTime = currentTime;
+            }
+        });
+        
+        // Camera setup
+        let lastFrame;
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+                video.srcObject = stream;
+                video.play();
+            });
+
+        function processCameraFrame() {
+            if (!video.videoWidth) return;
+            
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = video.videoWidth;
+            tempCanvas.height = video.videoHeight;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(video, 0, 0);
+            
+            const currentFrame = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+            if (!lastFrame) {
+                lastFrame = currentFrame;
+                return;
+            }
+            
+            if (!initialCleared) {
+                initialCleared = true;
+                for(let x = 0; x < GRID.length; x++) {
+                    for(let y = 0; y < GRID[0].length; y++) {
+                        GRID[x][y].layers.forEach(layer => {
+                            layer.opacity = 0;
+                            layer.depth = 0;
+                        });
+                    }
+                }
+            }
+            
+            const scaleX = tempCanvas.width / GRID.length;
+            const scaleY = tempCanvas.height / GRID[0].length;
+            
+            // Enhanced motion detection with neighbor averaging
+            for(let x = 0; x < GRID.length; x++) {
+                for(let y = 0; y < GRID[0].length; y++) {
+                    const cell = GRID[x][y];
+                    
+                    let totalDiff = 0;
+                    let samples = 0;
+                    
+                    // Sample a larger 5x5 area for more stable detection
+                    for(let dx = -2; dx <= 2; dx++) {
+                        for(let dy = -2; dy <= 2; dy++) {
+                            const pixelX = Math.floor(x * scaleX) + dx;
+                            const pixelY = Math.floor(y * scaleY) + dy;
+                            if (pixelX >= 0 && pixelX < tempCanvas.width &&
+                                pixelY >= 0 && pixelY < tempCanvas.height) {
+                                const i = (pixelY * tempCanvas.width + pixelX) * 4;
+                                totalDiff += Math.abs(currentFrame.data[i] - lastFrame.data[i]);
+                                samples++;
+                            }
+                        }
+                    }
+                    
+                    const diff = (totalDiff / samples) * 0.08; 
+                    
+                    cell.motionHistory.shift();
+                    cell.motionHistory.push(diff);
+                    
+                    const smoothedMotion = cell.motionHistory.reduce((acc, val, idx) => {
+                        const weight = Math.pow((idx + 1) / MOTION_HISTORY_SIZE, 2);
+                        return acc + val * weight;
+                    }, 0) / MOTION_HISTORY_SIZE;
+                    
+                    let targetOpacity = 0;
+                    let targetDepth = 0;
+                    let targetEnergy = 0;
+                    
+                    if (isInProtectedZone(x, y)) {
+                        if (smoothedMotion > BRICK_CREATION_THRESHOLD * 0.7) {
+                            targetOpacity = MAX_OPACITY;
+                            targetDepth = MAX_DEPTH;
+                            targetEnergy = 1;
+                        }
+                    } else if (smoothedMotion > BRICK_CREATION_THRESHOLD) {
+                        targetOpacity = MAX_OPACITY;
+                        targetDepth = MAX_DEPTH;
+                        targetEnergy = 1;
+                    } else {
+                        targetOpacity *= (1 - DECAY_RATE);
+                        targetDepth *= (1 - DECAY_RATE);
+                        targetEnergy *= (1 - DECAY_RATE);
+                    }
+                    
+                    cell.layers.forEach(layer => {
+                        layer.opacity += (targetOpacity - layer.opacity) * BRICK_TRANSITION_SPEED;
+                        layer.depth += (targetDepth - layer.depth) * BRICK_TRANSITION_SPEED;
+                        layer.energy += (targetEnergy - layer.energy) * BRICK_TRANSITION_SPEED;
+                    });
+                    
+                    // Ensure minimum opacity is maintained
+                    if (cell.layers[0].opacity < MIN_OPACITY) {
+                        cell.layers.forEach(layer => {
+                            layer.opacity = 0;
+                            layer.depth = 0;
+                            layer.energy = 0;
+                        });
+                    }
+                }
+            }
+            
+            lastFrame = currentFrame;
+        }
+
+        function updateMotionHistory() {
+            if (!video || !ctx) return;
+            
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const length = frame.data.length;
+            const data = frame.data;
+            
+            if (!lastFrame) {
+                lastFrame = new Uint8ClampedArray(length);
+                for (let i = 0; i < length; i++) {
+                    lastFrame[i] = data[i];
+                }
+                return;
+            }
+            
+            for (let x = 0; x < canvas.width; x += BRICK_SIZE) {
+                for (let y = 0; y < canvas.height; y += BRICK_SIZE) {
+                    let motionSum = 0;
+                    let samples = 0;
+                    let r = 0, g = 0, b = 0;
+                    
+                    // Sample for motion and color
+                    for (let dx = -2; dx <= 2; dx++) {
+                        for (let dy = -2; dy <= 2; dy++) {
+                            const px = x + dx * 5;
+                            const py = y + dy * 5;
+                            
+                            if (px >= 0 && px < canvas.width && py >= 0 && py < canvas.height) {
+                                const i = (py * canvas.width + px) * 4;
+                                const diff = Math.abs(data[i] - lastFrame[i]) +
+                                           Math.abs(data[i+1] - lastFrame[i+1]) +
+                                           Math.abs(data[i+2] - lastFrame[i+2]);
+                                motionSum += diff;
+                                r += data[i];
+                                g += data[i+1];
+                                b += data[i+2];
+                                samples++;
+                            }
+                        }
+                    }
+                    
+                    const avgMotion = (motionSum / samples) * MOTION_SENSITIVITY;
+                    const gridX = Math.floor(x / BRICK_SIZE);
+                    const gridY = Math.floor(y / BRICK_SIZE);
+                    
+                    if (gridX < GRID.length && gridY < GRID[0].length) {
+                        const cell = GRID[gridX][gridY];
+                        const normalizedMotion = Math.min(1, avgMotion / 100);
+                        
+                        // Convert to HSL
+                        const avgR = r / samples / 255;
+                        const avgG = g / samples / 255;
+                        const avgB = b / samples / 255;
+                        const max = Math.max(avgR, avgG, avgB);
+                        const min = Math.min(avgR, avgG, avgB);
+                        let h, s, l = (max + min) / 2;
+                        
+                        if (max === min) {
+                            h = s = 0;
+                        } else {
+                            const d = max - min;
+                            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                            switch (max) {
+                                case avgR: h = (avgG - avgB) / d + (avgG < avgB ? 6 : 0); break;
+                                case avgG: h = (avgB - avgR) / d + 2; break;
+                                case avgB: h = (avgR - avgG) / d + 4; break;
+                            }
+                            h /= 6;
+                        }
+                        
+                        const targetColor = {
+                            h: h * 360,
+                            s: s * 100,
+                            l: l * 100
+                        };
+                        
+                        // Update each layer with slightly different properties
+                        cell.layers.forEach((layer, index) => {
+                            // Offset color for each layer
+                            const layerColor = {
+                                h: (targetColor.h + index * 30) % 360,
+                                s: Math.min(100, targetColor.s + index * 10),
+                                l: Math.max(0, targetColor.l - index * 15)
+                            };
+                            
+                            layer.targetColor = layerColor;
+                            
+                            // Smooth color transition
+                            layer.color.h += (layer.targetColor.h - layer.color.h) * COLOR_MEMORY_DECAY;
+                            layer.color.s += (layer.targetColor.s - layer.color.s) * COLOR_MEMORY_DECAY;
+                            layer.color.l += (layer.targetColor.l - layer.color.l) * COLOR_MEMORY_DECAY;
+                            
+                            if (normalizedMotion > BRICK_CREATION_THRESHOLD) {
+                                const layerMotion = normalizedMotion * (1 - index * 0.2); // Reduce effect on deeper layers
+                                layer.opacity = Math.min(MAX_OPACITY, layer.opacity + BRICK_GROWTH_RATE * layerMotion);
+                                layer.depth = Math.min(MAX_DEPTH, layer.depth + BRICK_GROWTH_RATE * layerMotion * 0.8);
+                                layer.energy = Math.min(1, layer.energy + layerMotion * 0.6);
+                            }
+                        });
+                        
+                        // Update motion history
+                        cell.motionHistory.push(normalizedMotion);
+                        if(cell.motionHistory.length > MOTION_HISTORY_SIZE) {
+                            cell.motionHistory.shift();
+                        }
+                    }
+                }
+            }
+            
+            for (let i = 0; i < length; i++) {
+                lastFrame[i] = data[i];
+            }
+        }
+
+        function drawBrick(x, y, cell) {
+            // Draw each layer with offset
+            cell.layers.forEach((layer, index) => {
+                const depth = layer.depth * 0.4;
+                const baseOffset = depth * 0.2;
+                
+                // Offset each layer slightly differently
+                const layerOffset = index * 2;
+                const xOffset = baseOffset + layerOffset;
+                const yOffset = baseOffset + layerOffset;
+                
+                // Quantize colors for pixel-art effect
+                const quantizedColor = quantizeColor(layer.color);
+                
+                // Adjust opacity based on layer and depth
+                const layerOpacity = layer.opacity * (0.6 + (layer.depth/MAX_DEPTH) * 0.4);
+                const adjustedOpacity = layerOpacity * (1 - (index * 0.15)); // Fade deeper layers
+                
+                // Main brick
+                ctx.fillStyle = `hsla(${quantizedColor.h}, ${quantizedColor.s}%, ${quantizedColor.l}%, ${adjustedOpacity})`;
+                ctx.beginPath();
+                ctx.roundRect(
+                    x*BRICK_SIZE - xOffset,
+                    y*BRICK_SIZE - yOffset,
+                    BRICK_SIZE,
+                    BRICK_SIZE,
+                    1 // Sharper corners for pixel look
+                );
+                ctx.fill();
+                
+                // Pixel highlight
+                if(depth > 0.1) {
+                    const highlightOpacity = adjustedOpacity * 0.25;
+                    const brighterColor = {
+                        h: quantizedColor.h,
+                        s: Math.max(0, quantizedColor.s - 20),
+                        l: Math.min(100, quantizedColor.l + 20)
+                    };
+                    
+                    ctx.fillStyle = `hsla(${brighterColor.h}, ${brighterColor.s}%, ${brighterColor.l}%, ${highlightOpacity})`;
+                    ctx.beginPath();
+                    ctx.roundRect(
+                        x*BRICK_SIZE - xOffset + BRICK_SIZE*0.1,
+                        y*BRICK_SIZE - yOffset + BRICK_SIZE*0.1,
+                        BRICK_SIZE*0.3,
+                        BRICK_SIZE*0.3,
+                        0 // Sharp corners for highlight
+                    );
+                    ctx.fill();
+                }
+            });
+        }
+
+        // Animation loop
+        let lastTime = 0;
+        const frameInterval = 1000/30;
+
+        function animate(currentTime) {
+            const elapsed = currentTime - lastTime;
+            
+            if (elapsed > frameInterval) {
+                lastTime = currentTime - (elapsed % frameInterval);
+                
+                // Update color state
+                colorState.time += COLOR_SHIFT_SPEED;
+                
+                // Use composite operation for more subtle clearing
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.fillStyle = `rgba(0, 0, 0, ${CLEAR_ALPHA})`;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.globalCompositeOperation = 'source-over';
+                
+                // Draw grid with current color palette
+                for(let x = 0; x < GRID.length; x++) {
+                    for(let y = 0; y < GRID[0].length; y++) {
+                        const cell = GRID[x][y];
+                        if(cell.layers[0].opacity > 0.01) {
+                            drawBrick(x, y, cell);
+                        }
+                    }
+                }
+                
+                // Update and draw all game objects with adjusted composite operations
+                ctx.globalCompositeOperation = 'lighter';
+                for (let i = balls.length - 1; i >= 0; i--) {
+                    if (!balls[i].update()) {
+                        balls.splice(i, 1);
+                    } else {
+                        balls[i].draw();
+                    }
+                }
+                
+                for (let i = adversaries.length - 1; i >= 0; i--) {
+                    if (!adversaries[i].update()) {
+                        adversaries.splice(i, 1);
+                    } else {
+                        adversaries[i].draw();
+                    }
+                }
+                ctx.globalCompositeOperation = 'source-over';
+            }
+            
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+        
+        setInterval(updateMotionHistory, 1000/60);
+    </script>
+</body>
+</html>

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WalkerThunder - Media Bridge Visualization</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: #ffffff;
+        }
+        #container {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+        }
+        #builder-view {
+            width: 70%;
+            height: 100%;
+            position: relative;
+        }
+        #camera-views {
+            width: 30%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        #camera1-view, #camera2-view, #virtual-view {
+            height: 33.33%;
+            position: relative;
+        }
+        .overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+            pointer-events: none;
+        }
+        .controls-info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        #export-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 8px 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #export-btn:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="builder-view">
+            <div class="overlay">Builder View</div>
+            <div class="controls-info">
+                <p>Controls:</p>
+                <p>WASD - Move Camera</p>
+                <p>Mouse - Look Around</p>
+                <p>P - Add Pedestrian</p>
+                <p>G - Move Tool</p>
+                <p>R - Rotate Tool</p>
+                <p>S - Scale Tool</p>
+                <p>ESC - Deselect</p>
+                <p>Click camera icons to select</p>
+            </div>
+            <button id="export-btn">Export Scene</button>
+        </div>
+        <div id="camera-views">
+            <div id="camera1-view">
+                <div class="overlay">Front Camera (Real)</div>
+            </div>
+            <div id="camera2-view">
+                <div class="overlay">Side Camera</div>
+            </div>
+            <div id="virtual-view">
+                <div class="overlay">Virtual Top-Down View</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Three.js and extensions -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
+
+    <!-- Main application -->
+    <script type="module">
+        import SceneManager from './js/walkerthunder.js';
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const sceneManager = new SceneManager();
+            sceneManager.animate();
+
+            // Export button handler
+            document.getElementById('export-btn').addEventListener('click', () => {
+                const sceneData = sceneManager.exportScene();
+                const blob = new Blob([sceneData], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'scene-export.json';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
+        });
+    </script>
+</body>
+</html>

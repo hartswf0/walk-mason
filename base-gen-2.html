@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Ensure proper scaling on mobile devices -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hyperclay 3D Sculpting Interface</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #111; }
+    canvas { display: block; }
+    /* Optional mini-camera view for debugging */
+    #cameraFeed {
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      width: 160px;
+      opacity: 0.6;
+      border: 2px solid #fff;
+    }
+  </style>
+</head>
+<body>
+  <!-- Hidden video element for the camera feed -->
+  <video id="cameraFeed" autoplay playsinline muted></video>
+  <!-- Main canvas for drawing the hyperclay sculpture -->
+  <canvas id="canvas"></canvas>
+
+  <script>
+    /***** SETUP: CANVAS, VIDEO, AND OFFSCREEN PROCESSING *****/
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const video = document.getElementById('cameraFeed');
+
+    // Resize the main canvas to fill the window.
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // Create an offscreen canvas for processing camera frames.
+    const offCanvas = document.createElement('canvas');
+    const offCtx = offCanvas.getContext('2d');
+
+    // Request camera access (must be served via HTTPS or localhost).
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+      .then(stream => {
+        video.srcObject = stream;
+        video.play();
+      })
+      .catch(err => {
+        console.error("Camera access error:", err);
+      });
+
+    /***** GRID & HEIGHT MAP SETUP *****/
+    // Define our 2D grid dimensions (which map to columns on our sculpture).
+    const gridCols = 50;
+    const gridRows = 50;
+    const cellSize = 20; // Logical cell size for our grid
+
+    // The heightMap holds our "clay" height (material density) for each grid cell.
+    const heightMap = [];
+    for (let i = 0; i < gridCols; i++) {
+      heightMap[i] = [];
+      for (let j = 0; j < gridRows; j++) {
+        heightMap[i][j] = 0;
+      }
+    }
+
+    // Parameters for deposition and erosion.
+    const depositionRate = 2;    // How much material is added per motion event
+    const erosionFactor = 0.995; // Continuous erosion (multiplicative decay)
+    const motionThreshold = 30;  // Motion intensity threshold to trigger deposition
+
+    // For camera frame processing.
+    let prevFrameData = null;
+    // Track the last time motion was detected.
+    let lastMotionTime = Date.now();
+
+    /***** MAIN ANIMATION LOOP *****/
+    function animate() {
+      requestAnimationFrame(animate);
+
+      // Draw a semi-transparent overlay to fade previous drawings.
+      // (This gives a sense of persistence while allowing erosion to be visible.)
+      ctx.fillStyle = 'rgba(17, 17, 17, 0.5)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      /***** PROCESS CAMERA FRAME TO DETECT MOTION *****/
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        // Set the offscreen canvas to match the video dimensions.
+        offCanvas.width = video.videoWidth;
+        offCanvas.height = video.videoHeight;
+        offCtx.drawImage(video, 0, 0, offCanvas.width, offCanvas.height);
+        const frameData = offCtx.getImageData(0, 0, offCanvas.width, offCanvas.height);
+
+        if (prevFrameData) {
+          // Determine the corresponding size of a cell region in the video frame.
+          const cellW = offCanvas.width / gridCols;
+          const cellH = offCanvas.height / gridRows;
+
+          // For each grid cell, sample a few pixels to compute average motion.
+          for (let i = 0; i < gridCols; i++) {
+            for (let j = 0; j < gridRows; j++) {
+              let sumDiff = 0, count = 0;
+              const sampleCount = 4; // number of random samples per cell
+              for (let s = 0; s < sampleCount; s++) {
+                const sampleX = Math.floor(i * cellW + Math.random() * cellW);
+                const sampleY = Math.floor(j * cellH + Math.random() * cellH);
+                const idx = (sampleY * offCanvas.width + sampleX) * 4;
+                const rDiff = Math.abs(frameData.data[idx] - prevFrameData.data[idx]);
+                const gDiff = Math.abs(frameData.data[idx + 1] - prevFrameData.data[idx + 1]);
+                const bDiff = Math.abs(frameData.data[idx + 2] - prevFrameData.data[idx + 2]);
+                sumDiff += (rDiff + gDiff + bDiff) / 3;
+                count++;
+              }
+              const avgDiff = sumDiff / count;
+
+              // If motion is detected above the threshold, deposit clay at this cell.
+              if (avgDiff > motionThreshold) {
+                heightMap[i][j] = Math.min(heightMap[i][j] + depositionRate, 200);
+                lastMotionTime = Date.now();
+              }
+            }
+          }
+        }
+        prevFrameData = frameData;
+      }
+
+      /***** UPDATE THE HEIGHT MAP (EROSION & DIFFUSION) *****/
+      // Erode each cell gradually.
+      for (let i = 0; i < gridCols; i++) {
+        for (let j = 0; j < gridRows; j++) {
+          heightMap[i][j] *= erosionFactor;
+        }
+      }
+      // (Optional: add lateral diffusion here to simulate clay flow.)
+
+      /***** ADAPTIVE DRAWING FIDELITY *****/
+      // If no motion has been detected for a while, lower drawing resolution.
+      const timeSinceMotion = Date.now() - lastMotionTime;
+      const drawStep = timeSinceMotion > 2000 ? 2 : 1; // if >2 sec of stillness, skip every other cell
+
+      /***** RENDER THE HEIGHT MAP USING ISOMETRIC PROJECTION *****/
+      // Center our drawing.
+      const offsetX = canvas.width / 2;
+      const offsetY = 50;  // a top offset
+      const heightScale = 0.5; // factor converting heightMap value to vertical offset
+
+      // Draw cells in back-to-front order (using the sum of grid indices).
+      for (let sum = 0; sum < gridCols + gridRows; sum++) {
+        for (let i = 0; i < gridCols; i++) {
+          let j = sum - i;
+          if (j >= 0 && j < gridRows) {
+            // Skip some cells if fidelity is lowered.
+            if (i % drawStep !== 0 || j % drawStep !== 0) continue;
+
+            // Isometric projection: convert grid coordinates (i, j) and height to screen coordinates.
+            // (These formulas create a pseudo-3D effect.)
+            const isoX = (i - j) * (cellSize / 2);
+            const isoY = (i + j) * (cellSize / 4) - heightMap[i][j] * heightScale;
+            const screenX = offsetX + isoX;
+            const screenY = offsetY + isoY;
+
+            // Determine a color based on the height.
+            const brightness = Math.min(100, 40 + heightMap[i][j] * 0.3);
+            ctx.fillStyle = `hsl(30, 70%, ${brightness}%)`;
+
+            // Draw the top face of the "clay" cell.
+            ctx.fillRect(screenX - cellSize / 2, screenY - cellSize / 4, cellSize, cellSize / 2);
+
+            // Optionally, draw a side face to simulate volume if the height is significant.
+            if (heightMap[i][j] > 1) {
+              ctx.fillStyle = `hsl(30, 70%, ${brightness - 10}%)`;
+              ctx.fillRect(screenX - cellSize / 2, screenY, cellSize, heightMap[i][j] * heightScale);
+            }
+          }
+        }
+      }
+    }
+    animate();
+  </script>
+</body>
+</html>

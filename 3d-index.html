@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WALK MASON</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@700&display=swap');
+        
+        :root {
+            --vertigo-red: #C8102E;
+            --golden-age: #FFB400;
+            --black: #000000;
+            --white: #FFFFFF;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: var(--black);
+            color: var(--white);
+            font-family: 'Oswald', sans-serif;
+            overflow: hidden;
+            min-height: 100vh;
+            perspective: 1000px;
+        }
+        
+        .scene {
+            position: fixed;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transform-style: preserve-3d;
+            animation: cameraMove 20s infinite linear;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            position: relative;
+            transform-style: preserve-3d;
+        }
+        
+        .title {
+            font-size: 12vw;
+            text-transform: uppercase;
+            letter-spacing: -0.05em;
+            position: absolute;
+            width: 100%;
+            text-align: center;
+            transform: translateZ(100px);
+            animation: titlePulse 4s infinite ease-in-out;
+        }
+        
+        .title span {
+            display: block;
+            position: relative;
+            line-height: 0.8;
+            transform-style: preserve-3d;
+        }
+        
+        .title span:nth-child(1) {
+            color: var(--vertigo-red);
+            transform: translateX(-5%) translateZ(50px);
+            animation: glitch 0.1s infinite steps(2) alternate;
+        }
+        
+        .title span:nth-child(2) {
+            color: var(--golden-age);
+            transform: translateX(5%) translateZ(-50px);
+            animation: glitch 0.1s infinite steps(2) alternate-reverse;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 2rem;
+            padding: 2rem;
+            transform: translateY(40vh) rotateX(60deg);
+            transform-style: preserve-3d;
+        }
+        
+        .link {
+            position: relative;
+            padding: 2rem;
+            text-decoration: none;
+            color: var(--white);
+            background: var(--black);
+            border: 2px solid var(--white);
+            transition: all 0.3s ease;
+            transform-style: preserve-3d;
+            animation: linkFloat 3s infinite ease-in-out;
+            animation-delay: calc(var(--i) * 0.2s);
+        }
+        
+        .link::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--vertigo-red);
+            transform: translateZ(-50px);
+            opacity: 0;
+            transition: all 0.3s ease;
+        }
+        
+        .link:hover {
+            transform: translateZ(50px);
+        }
+        
+        .link:hover::before {
+            opacity: 0.5;
+            transform: translateZ(-20px);
+        }
+        
+        .link:nth-child(even):hover::before {
+            background: var(--golden-age);
+        }
+        
+        .link h2 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            transform: translateZ(20px);
+        }
+        
+        .link p {
+            transform: translateZ(10px);
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+        
+        .geometric-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            mix-blend-mode: overlay;
+            opacity: 0.1;
+        }
+        
+        .geometric-overlay::before {
+            content: '';
+            position: absolute;
+            width: 200vmax;
+            height: 200vmax;
+            border: 2px solid var(--white);
+            transform: rotate(45deg);
+            animation: gridRotate 40s infinite linear;
+        }
+        
+        @keyframes cameraMove {
+            0% { transform: rotate3d(1, 1, 0, 0deg); }
+            50% { transform: rotate3d(1, 1, 0, 10deg); }
+            100% { transform: rotate3d(1, 1, 0, 0deg); }
+        }
+        
+        @keyframes titlePulse {
+            0%, 100% { transform: translateZ(100px); }
+            50% { transform: translateZ(150px); }
+        }
+        
+        @keyframes linkFloat {
+            0%, 100% { transform: translateZ(0); }
+            50% { transform: translateZ(30px); }
+        }
+        
+        @keyframes glitch {
+            0% { transform: translate(-5%, 2px); }
+            100% { transform: translate(5%, -2px); }
+        }
+        
+        @keyframes gridRotate {
+            0% { transform: rotate(45deg); }
+            100% { transform: rotate(405deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="geometric-overlay"></div>
+    <div class="scene">
+        <div class="container">
+            <h1 class="title">
+                <span>WALK</span>
+                <span>MASON</span>
+            </h1>
+            
+            <div class="grid">
+                <a href="gh1.html" class="link" style="--i: 1">
+                    <h2>Great Hall One</h2>
+                    <p>Original Composition</p>
+                </a>
+                
+                <a href="gh2.html" class="link" style="--i: 2">
+                    <h2>Great Hall Two</h2>
+                    <p>Light & Shadow</p>
+                </a>
+                
+                <a href="gh3.html" class="link" style="--i: 3">
+                    <h2>Great Hall Three</h2>
+                    <p>Dynamic Space</p>
+                </a>
+                
+                <a href="great-hall.html" class="link" style="--i: 4">
+                    <h2>Great Hall</h2>
+                    <p>The Original</p>
+                </a>
+                
+                <a href="oggh.html" class="link" style="--i: 5">
+                    <h2>OG Great Hall</h2>
+                    <p>Where It Began</p>
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Add perspective distortion on mouse move
+        document.addEventListener('mousemove', (e) => {
+            const scene = document.querySelector('.scene');
+            const xAxis = (window.innerWidth / 2 - e.pageX) / 50;
+            const yAxis = (window.innerHeight / 2 - e.pageY) / 50;
+            scene.style.transform = `rotateY(${xAxis}deg) rotateX(${yAxis}deg)`;
+        });
+        
+        // Random glitch effect
+        setInterval(() => {
+            const title = document.querySelector('.title');
+            title.style.transform = `translateZ(100px) skew(${Math.random() * 2 - 1}deg)`;
+            setTimeout(() => {
+                title.style.transform = 'translateZ(100px)';
+            }, 50);
+        }, 2000);
+    </script>
+</body>
+</html>

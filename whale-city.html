@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        canvas {
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="cityCanvas"></canvas>
+    <script>
+        const canvas = document.getElementById('cityCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Set canvas size to 3:1 aspect ratio
+        canvas.width = Math.min(window.innerWidth * 0.95, 1200);
+        canvas.height = canvas.width / 3;
+
+        // Constants
+        const BRICK_WIDTH = 8;
+        const BRICK_HEIGHT = 4;
+        const NUM_BUILDERS = 50;
+        const DECAY_RATE = 0.0003;
+        const MAX_HEIGHT = 8;
+        const MOVEMENT_TYPES = {
+            fast: { speed: 2.5, build: 0.1, color: [220, 140, 80] },
+            slow: { speed: 0.6, build: 0.4, color: [180, 100, 60] }
+        };
+
+        // City grid
+        const gridWidth = Math.ceil(canvas.width / BRICK_WIDTH);
+        const gridHeight = Math.ceil(canvas.height / BRICK_HEIGHT);
+        const grid = {
+            heights: new Float32Array(gridWidth * gridHeight),
+            traffic: new Float32Array(gridWidth * gridHeight),
+            density: new Float32Array(gridWidth * gridHeight)
+        };
+
+        // Improved Builder class with pathfinding
+        class Builder {
+            constructor() {
+                this.reset();
+                this.type = Math.random() < 0.3 ? 'fast' : 'slow';
+                this.config = MOVEMENT_TYPES[this.type];
+                this.history = [];
+            }
+
+            reset() {
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                this.angle = Math.random() * Math.PI * 2;
+                this.targetHeight = 0;
+            }
+
+            updateGrid(x, y, amount) {
+                const gridX = Math.floor(x / BRICK_WIDTH);
+                const gridY = Math.floor(y / BRICK_HEIGHT);
+                
+                if (gridX >= 0 && gridX < gridWidth && gridY >= 0 && gridY < gridHeight) {
+                    const index = gridY * gridWidth + gridX;
+                    
+                    grid.traffic[index] += this.config.build;
+                    grid.density[index] = Math.min(1, grid.density[index] + 0.1);
+                    grid.heights[index] = Math.min(
+                        MAX_HEIGHT,
+                        Math.sqrt(grid.traffic[index])
+                    );
+
+                    // Spread influence to neighbors
+                    for(let dx = -1; dx <= 1; dx++) {
+                        for(let dy = -1; dy <= 1; dy++) {
+                            const nx = gridX + dx;
+                            const ny = gridY + dy;
+                            if(nx >= 0 && nx < gridWidth && ny >= 0 && ny < gridHeight) {
+                                const nIndex = ny * gridWidth + nx;
+                                grid.traffic[nIndex] += this.config.build * 0.05;
+                            }
+                        }
+                    }
+                }
+            }
+
+            chooseDirection() {
+                const gridX = Math.floor(this.x / BRICK_WIDTH);
+                const gridY = Math.floor(this.y / BRICK_HEIGHT);
+                const currentIndex = gridY * gridWidth + gridX;
+                const currentHeight = grid.heights[currentIndex];
+
+                // Pathfinding logic
+                const lookAhead = 3;
+                const futureX = this.x + Math.cos(this.angle) * BRICK_WIDTH * lookAhead;
+                const futureY = this.y + Math.sin(this.angle) * BRICK_HEIGHT * lookAhead;
+                const futureGridX = Math.floor(futureX / BRICK_WIDTH);
+                const futureGridY = Math.floor(futureY / BRICK_HEIGHT);
+
+                let shouldTurn = false;
+                if (futureGridX < 0 || futureGridX >= gridWidth || 
+                    futureGridY < 0 || futureGridY >= gridHeight) {
+                    shouldTurn = true;
+                } else {
+                    const futureIndex = futureGridY * gridWidth + futureGridX;
+                    shouldTurn = grid.heights[futureIndex] > currentHeight + 1;
+                }
+
+                if (shouldTurn) {
+                    const leftAngle = this.angle + Math.PI/2;
+                    const rightAngle = this.angle - Math.PI/2;
+                    
+                    // Choose path with lower height
+                    const leftHeight = this.checkDirection(leftAngle);
+                    const rightHeight = this.checkDirection(rightAngle);
+                    
+                    this.angle = leftHeight < rightHeight ? leftAngle : rightAngle;
+                }
+            }
+
+            checkDirection(angle) {
+                const checkX = this.x + Math.cos(angle) * BRICK_WIDTH * 2;
+                const checkY = this.y + Math.sin(angle) * BRICK_HEIGHT * 2;
+                const gridX = Math.floor(checkX / BRICK_WIDTH);
+                const gridY = Math.floor(checkY / BRICK_HEIGHT);
+                
+                if (gridX < 0 || gridX >= gridWidth || gridY < 0 || gridY >= gridHeight) {
+                    return Infinity;
+                }
+                return grid.heights[gridY * gridWidth + gridX];
+            }
+
+            update() {
+                this.chooseDirection();
+                
+                // Move builder
+                this.x += Math.cos(this.angle) * this.config.speed;
+                this.y += Math.sin(this.angle) * this.config.speed;
+                
+                // Wrap around edges
+                this.x = (this.x + canvas.width) % canvas.width;
+                this.y = (this.y + canvas.height) % canvas.height;
+                
+                // Update grid
+                this.updateGrid(this.x, this.y, this.config.build);
+            }
+        }
+
+        // Create builders
+        const builders = Array.from({ length: NUM_BUILDERS }, () => new Builder());
+
+        // Rendering functions
+        function drawBrick(x, y, heightValue) {
+            const baseColor = MOVEMENT_TYPES.fast.color;
+            const topColor = MOVEMENT_TYPES.slow.color;
+            const shade = Math.max(0.4, Math.min(1, heightValue / MAX_HEIGHT));
+            
+            // Base brick
+            ctx.fillStyle = `rgb(
+                ${baseColor[0] * shade}, 
+                ${baseColor[1] * shade}, 
+                ${baseColor[2] * shade}
+            )`;
+            ctx.fillRect(x, y, BRICK_WIDTH-1, BRICK_HEIGHT-1);
+            
+            // Height indicator
+            ctx.fillStyle = `rgb(
+                ${topColor[0] * shade}, 
+                ${topColor[1] * shade}, 
+                ${topColor[2] * shade}
+            )`;
+            ctx.fillRect(x, y - heightValue * 2, BRICK_WIDTH-1, 2);
+        }
+
+        // Animation loop
+        function animate() {
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Update grid and builders
+            builders.forEach(builder => builder.update());
+
+            // Draw bricks with decay
+            for (let y = 0; y < gridHeight; y++) {
+                for (let x = 0; x < gridWidth; x++) {
+                    const index = y * gridWidth + x;
+                    
+                    grid.traffic[index] = Math.max(0, grid.traffic[index] - DECAY_RATE);
+                    grid.heights[index] = Math.max(0, Math.sqrt(grid.traffic[index]));
+
+                    if (grid.heights[index] > 0) {
+                        drawBrick(
+                            x * BRICK_WIDTH,
+                            y * BRICK_HEIGHT + BRICK_HEIGHT,
+                            grid.heights[index]
+                        );
+                    }
+                }
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        // Start animation
+        animate();
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = Math.min(window.innerWidth * 0.95, 1200);
+            canvas.height = canvas.width / 3;
+            // Reset grid
+            const newGridWidth = Math.ceil(canvas.width / BRICK_WIDTH);
+            const newGridHeight = Math.ceil(canvas.height / BRICK_HEIGHT);
+            grid.heights = new Float32Array(newGridWidth * newGridHeight);
+            grid.traffic = new Float32Array(newGridWidth * newGridHeight);
+            grid.density = new Float32Array(newGridWidth * newGridHeight);
+        });
+    </script>
+</body>
+</html>
